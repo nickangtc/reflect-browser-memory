@@ -4,7 +4,7 @@ Reflect is a local-first Chrome extension for saving what you want to remember: 
 
 Sync is **off by default**. For cross-device sync, dashboard data, and sharing annotations through public URLs, deploy the Railway backend and configure it in the extension settings.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/A6KzyI?referralCode=HimNMF&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/X6k6Fk?referralCode=HimNMF&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Quickstart
 
