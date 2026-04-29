@@ -28,11 +28,7 @@ Reflect does not capture or sync:
 - general page visit history;
 - SPA navigation history;
 - browsing trails or click graphs;
-- referrer breadcrumbs for Read Later;
-- automatic X/Twitter or LinkedIn interactions;
-- social-post tracking;
-- network/search requests;
-- YouTube blocking/value checkpoints.
+- network/search requests.
 
 ## Backend configuration
 
