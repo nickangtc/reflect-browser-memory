@@ -27,7 +27,7 @@ After deploy, generate/copy the backend service public URL. Then open the extens
 - **API key**: the same value as `API_KEY`
 - **Enable Backend Sync**: on
 
-Cloudflare R2 variables are optional and only needed for image/note attachment uploads. If configured, create an R2 bucket named `reflect-images`.
+Cloudflare R2 variables are optional and only needed for image/note attachment uploads and highlighting images in articles. If configured, create an R2 bucket named `reflect-images`. If you don't want to use this, put "-" in the Railway template on first deployment, then delete those R2 variables in Railway.
 
 ## What Reflect captures
 
