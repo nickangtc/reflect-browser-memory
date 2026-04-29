@@ -31,6 +31,7 @@ OSS migration task tracking lives in uppercase `TASKS.md`; keep that filename ca
 - `backend/railway.json` is intended for running `railway up` from `backend/`; keep `watchPatterns` relative to that directory (currently `**`, not `backend/**`).
 - For public release, do not publish the existing git history as-is; old commits contain private deployment/proxy references. Use a clean-history repo/export or rewrite history first.
 - The backend initializes/updates schema from `backend/init.sql` at startup so Railway deploys do not need a manual `psql` step.
+- Railway template setup should only require users to fill `API_KEY`; `PORT` is Railway-provided, `DATABASE_URL` comes from the Postgres service reference, `NODE_ENV` is unnecessary, and R2 variables should stay optional unless attachments are explicitly configured.
 
 ## Extension
 - Service worker: `background-with-api.js`

@@ -4,6 +4,8 @@ Reflect is a local-first Chrome extension for saving what you want to remember: 
 
 Sync is **off by default**. For cross-device sync, dashboard data, and sharing annotations through public URLs, deploy the Railway backend and configure it in the extension settings.
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/A6KzyI?referralCode=HimNMF&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
 ## Quickstart
 
 ### 1. Load the extension
@@ -17,19 +19,9 @@ That is enough for local text highlights. Read Later, image uploads, cross-devic
 
 ### 2. Optional Railway sync
 
-After the Railway template is published, click its **Deploy on Railway** button.
+Click **Deploy on Railway** above. The template creates the backend and PostgreSQL database. Set `API_KEY` to a long random secret during setup.
 
-Until then:
-
-1. Create a Railway project from this GitHub repo.
-2. Add a PostgreSQL database.
-3. Set the backend service **Root Directory** to `/backend`.
-4. Set variables:
-   - `DATABASE_URL` from the Railway PostgreSQL service
-   - `API_KEY` to a long random secret
-5. Generate a public domain for the backend service.
-
-The backend initializes its own schema on startup. Then open the extension options page and set:
+After deploy, generate/copy the backend service public URL. Then open the extension options page and set:
 
 - **Backend URL**: your Railway service URL
 - **API key**: the same value as `API_KEY`

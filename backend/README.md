@@ -10,16 +10,16 @@ Express + PostgreSQL API for Reflect sync, dashboard data, images, notes, Read L
 4. Set `API_KEY` to a long random secret.
 5. Generate a public domain.
 
-`DATABASE_URL` comes from Railway PostgreSQL. The backend creates/updates its schema on startup.
+`DATABASE_URL` comes from Railway PostgreSQL and `PORT` is provided by Railway. Do not ask users to fill either value in the template. The backend creates/updates its schema on startup.
 
-Optional attachment upload variables: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_DOMAIN`. R2 uploads use a bucket named `reflect-images`.
+Optional attachment upload variables: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_DOMAIN`. Leave them unset unless using R2. R2 uploads use a bucket named `reflect-images`.
 
 ## Local
 
 ```bash
 npm install
 cp .env.example .env
-# edit DATABASE_URL and API_KEY
+# edit API_KEY and uncomment/set DATABASE_URL for local dev
 npm start
 ```
 

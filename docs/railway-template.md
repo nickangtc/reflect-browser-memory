@@ -14,15 +14,18 @@ Use this when publishing the one-click Railway template for Reflect.
 
 ## Variables
 
-Required on backend service:
+Required user-provided variable on backend service:
 
-- `API_KEY` — user-provided long random secret
+- `API_KEY` — long random secret
 
-Provided by Railway PostgreSQL:
+Automatically provided by Railway:
 
-- `DATABASE_URL`
+- `DATABASE_URL` — from the PostgreSQL service
+- `PORT` — do not ask users to fill this
 
-Optional for image/note attachments:
+Do not require `NODE_ENV`; the backend runs without it.
+
+Optional image/note attachment variables. Do not include these in the one-click required setup unless the template is specifically for R2 uploads:
 
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
