@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <h1>Reflect</h1>
+  </div>
+
+  <div class="read-later-section">
+    <button id="read-later-btn" class="read-later-btn" disabled>
+      <span id="read-later-label">Read Later</span>
+    </button>
+    <div id="read-later-status" class="read-later-status"></div>
+  </div>
+
+  <div class="shortcuts-section">
+    <div class="shortcut-config">
+      <span class="shortcut-label">Highlight</span>
+      <div class="shortcut-row">
+        <kbd id="shortcut-display"></kbd>
+        <button id="shortcut-change">Change</button>
+      </div>
+      <div id="shortcut-recorder" class="shortcut-recorder" style="display:none">
+        Press your desired shortcut...
+      </div>
+    </div>
+    <div class="shortcut-config">
+      <span class="shortcut-label">YT Annotate</span>
+      <div class="shortcut-row">
+        <kbd id="yt-shortcut-display"></kbd>
+        <button id="yt-shortcut-change">Change</button>
+      </div>
+      <div id="yt-shortcut-recorder" class="shortcut-recorder" style="display:none">
+        Press your desired shortcut...
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shared Video - Reflect</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    .branding {
+      font-size: 12px;
+      color: #bbb;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .video-header {
+      margin-bottom: 24px;
+    }
+
+    .video-header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      line-height: 1.3;
+    }
+
+    .video-channel {
+      color: #666;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .video-embed {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+
+    .video-embed iframe {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .annotations-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    .annotations-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .annotations-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 580px) {
+      .annotations-grid { grid-template-columns: 1fr; }
+    }
+
+    .annotation-card {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 10px;
+      padding: 16px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    }
+
+    .annotation-card:hover {
+      border-color: #ccc;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      transform: translateY(-1px);
+    }
+
+    .annotation-card.active {
+      border-color: #f44336;
+      box-shadow: 0 2px 12px rgba(244,67,54,0.12);
+    }
+
+    .annotation-timestamp {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      color: #f44336;
+      background: #fef2f2;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .annotation-text {
+      font-size: 14px;
+      line-height: 1.5;
+      color: #333;
+      word-break: break-word;
+    }
+
+    .annotation-date {
+      font-size: 11px;
+      color: #bbb;
+      margin-top: 8px;
+    }
+
+    .loading, .error-msg {
+      text-align: center;
+      padding: 80px 24px;
+      color: #999;
+      font-size: 15px;
+    }
+
+    .error-msg { color: #c62828; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="branding">Reflect</div>
+
+    <div id="loading-state" class="loading">Loading...</div>
+    <div id="error-state" class="error-msg" style="display:none"></div>
+
+    <div id="main-content" style="display:none">
+      <div class="video-header">
+        <h1 id="video-title"></h1>
+        <div class="video-channel" id="video-channel"></div>
+      </div>
+
+      <div class="video-embed">
+        <div id="yt-player"></div>
+      </div>
+
+      <div class="annotations-label" id="annotations-label"></div>
+      <div class="annotations-grid" id="annotations-grid"></div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var API_BASE = window.location.origin;
+
+      var loadingState = document.getElementById('loading-state');
+      var errorState = document.getElementById('error-state');
+      var mainContent = document.getElementById('main-content');
+      var videoTitle = document.getElementById('video-title');
+      var videoChannel = document.getElementById('video-channel');
+      var annotationsGrid = document.getElementById('annotations-grid');
+      var annotationsLabel = document.getElementById('annotations-label');
+      var ytPlayer = null;
+      var playerReady = false;
+
+      function showState(el) {
+        [loadingState, errorState, mainContent].forEach(function(e) {
+          e.style.display = 'none';
+        });
+        el.style.display = '';
+      }
+
+      // Extract token from URL path /s/:token
+      var pathParts = window.location.pathname.split('/');
+      var token = pathParts[pathParts.length - 1];
+
+      if (!token) {
+        errorState.textContent = 'Invalid share link.';
+        showState(errorState);
+        return;
+      }
+
+      function extractVideoId(url) {
+        try {
+          var u = new URL(url);
+          return u.searchParams.get('v');
+        } catch(e) { return null; }
+      }
+
+      function formatTimestamp(seconds) {
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = Math.floor(seconds % 60);
+        if (h > 0) return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      function formatDate(iso) {
+        var d = new Date(iso);
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+
+      function initPlayer(vidId) {
+        var tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(tag);
+
+        window.onYouTubeIframeAPIReady = function() {
+          ytPlayer = new YT.Player('yt-player', {
+            videoId: vidId,
+            playerVars: { rel: 0, modestbranding: 1 },
+            events: {
+              onReady: function() { playerReady = true; }
+            }
+          });
+        };
+      }
+
+      function seekTo(seconds) {
+        if (ytPlayer && playerReady) {
+          ytPlayer.seekTo(Math.floor(seconds), true);
+          ytPlayer.playVideo();
+        }
+      }
+
+      document.addEventListener('keydown', function(e) {
+        if (e.code === 'Space' && !e.target.matches('input, textarea, [contenteditable]')) {
+          e.preventDefault();
+          if (!ytPlayer || !playerReady) return;
+          var state = ytPlayer.getPlayerState();
+          if (state === YT.PlayerState.PLAYING) {
+            ytPlayer.pauseVideo();
+          } else {
+            ytPlayer.playVideo();
+          }
+        }
+      });
+
+      fetch(API_BASE + '/api/shared-video/' + token)
+        .then(function(resp) {
+          if (resp.status === 403) {
+            errorState.textContent = 'This video is not publicly shared.';
+            showState(errorState);
+            return null;
+          }
+          if (resp.status === 404) {
+            errorState.textContent = 'Share link not found.';
+            showState(errorState);
+            return null;
+          }
+          return resp.json();
+        })
+        .then(function(data) {
+          if (!data) return;
+
+          var vidId = extractVideoId(data.video_url);
+          videoTitle.textContent = data.title || 'YouTube Video (' + vidId + ')';
+          if (data.channel) videoChannel.textContent = data.channel;
+          document.title = videoTitle.textContent + ' - Reflect';
+
+          initPlayer(vidId);
+
+          var annotations = data.annotations || [];
+          annotationsLabel.textContent = annotations.length + ' Annotation' + (annotations.length !== 1 ? 's' : '');
+
+          var activeCard = null;
+
+          annotations.forEach(function(ann) {
+            var card = document.createElement('div');
+            card.className = 'annotation-card';
+
+            var ts = document.createElement('div');
+            ts.className = 'annotation-timestamp';
+            ts.textContent = formatTimestamp(ann.timestamp_seconds);
+            card.appendChild(ts);
+
+            var text = document.createElement('div');
+            text.className = 'annotation-text';
+            text.textContent = ann.annotation;
+            card.appendChild(text);
+
+            var date = document.createElement('div');
+            date.className = 'annotation-date';
+            date.textContent = formatDate(ann.created_at);
+            card.appendChild(date);
+
+            card.addEventListener('click', function() {
+              if (activeCard) activeCard.classList.remove('active');
+              card.classList.add('active');
+              activeCard = card;
+              seekTo(ann.timestamp_seconds);
+              if (window.innerWidth < 580) {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }
+            });
+
+            annotationsGrid.appendChild(card);
+          });
+
+          showState(mainContent);
+        })
+        .catch(function() {
+          errorState.textContent = 'Failed to load. Please try again.';
+          showState(errorState);
+        });
+    })();
+  </script>
+</body>
+</html>
