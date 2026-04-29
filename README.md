@@ -2,7 +2,7 @@
 
 Reflect is a local-first Chrome extension for saving what you want to remember: highlights, annotations, nearby images, notes, Read Later pages, and YouTube timestamp notes.
 
-Sync is **off by default**. For cross-device sync and dashboard data, deploy the Railway backend and configure it in the extension settings.
+Sync is **off by default**. For cross-device sync, dashboard data, and sharing annotations through public URLs, deploy the Railway backend and configure it in the extension settings.
 
 ## Quickstart
 
@@ -13,7 +13,7 @@ Sync is **off by default**. For cross-device sync and dashboard data, deploy the
 3. Click **Load unpacked** and select this repo root.
 4. Highlight text with `Cmd+Shift+E` / `Ctrl+Shift+E`.
 
-That is enough for local text highlights. Read Later, image uploads, cross-device sync, and dashboard data require the backend.
+That is enough for local text highlights. Read Later, image uploads, cross-device sync, dashboard data, and public annotation sharing require the backend.
 
 ### 2. Optional Railway sync
 
@@ -52,7 +52,7 @@ Reflect does **not** capture general page history, browsing trails, referrers, s
 
 Reflect replaces the new tab page with:
 
-- **Library** — captured highlights, articles, images, videos, notes, and sharing controls
+- **Library** — captured highlights, articles, images, videos, notes, and sharing controls. Sharing creates public URLs and requires the backend.
 - **Read** — Read Later inbox
 - **Activity** — recent capture timeline
 - **Analytics** — activity heatmap, streaks, hourly/weekday charts, monthly trends, and top domains
@@ -72,7 +72,7 @@ Main tables:
 - `read_later`
 - `content_shares`
 
-Protected endpoints require an `X-API-Key` header matching `API_KEY`.
+Protected endpoints require an `X-API-Key` header matching `API_KEY`. Public annotation share URLs are served by the backend, so sharing is unavailable in local-only mode.
 
 ## Development checks
 
