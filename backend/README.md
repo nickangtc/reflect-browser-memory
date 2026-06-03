@@ -29,6 +29,7 @@ Protected endpoints require `X-API-Key` matching `API_KEY`.
 
 - Capture: `POST /api/highlight`, `POST /api/image`, `POST /api/youtube-annotation`
 - Dashboard: `GET /api/feed`, `GET /api/feed-sparkline`, `GET /api/timeline`, `GET /api/library`, `GET /api/analytics`
+- Search: `GET /api/search?q=...&limit=40&offset=0` searches explicit capture tables only. It builds search text from row JSON so newly-added metadata columns are included automatically, while startup validation checks the small set of columns required to render Library cards.
 - Detail: `GET /api/article-highlights`, `GET /api/youtube-annotations`, `GET /api/annotated-videos`
 - Notes: `/api/note`, `/api/notes`
 - Read Later: `/api/read-later`, `/api/read-later/check`
