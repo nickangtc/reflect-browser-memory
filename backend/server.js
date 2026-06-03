@@ -754,7 +754,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
       candidates AS (
         SELECT
           'image'::text AS type,
-          i.id,
+          i.id::text AS id,
           NULL::text AS base_url,
           i.r2_url,
           i.width,
@@ -782,7 +782,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
 
         SELECT
           'highlight'::text AS type,
-          h.id,
+          h.id::text AS id,
           NULL::text AS base_url,
           NULL::text AS r2_url,
           NULL::integer AS width,
@@ -810,7 +810,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
 
         SELECT
           'video'::text AS type,
-          NULL::uuid AS id,
+          NULL::text AS id,
           REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
           NULL::text AS r2_url,
           NULL::integer AS width,
@@ -839,7 +839,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
 
         SELECT
           'article'::text AS type,
-          NULL::uuid AS id,
+          NULL::text AS id,
           ae.base_url,
           NULL::text AS r2_url,
           NULL::integer AS width,
