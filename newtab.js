@@ -133,6 +133,8 @@
   var searchQuery = '';
   var searchDebounce = null;
   var searchBound = false;
+  var feedGeneration = 0;
+  var feedReloadPending = false;
 
   function loadLibrary() {
     var content = document.getElementById('library-content');
@@ -161,16 +163,22 @@
   }
 
   function resetLibraryFeed() {
+    feedGeneration++;
     feedOffset = 0;
     feedExhausted = false;
     feedTotal = null;
     libraryItems = [];
+    if (feedLoading) {
+      feedReloadPending = true;
+      return;
+    }
     fetchFeedPage(document.getElementById('library-content'), true);
   }
 
   function fetchFeedPage(content, initial) {
     if (feedLoading || feedExhausted) return;
     feedLoading = true;
+    var requestGeneration = feedGeneration;
 
     var url;
     if (isSearchActive()) {
@@ -182,6 +190,14 @@
 
     apiFetch(url)
       .then(function(data) {
+        if (requestGeneration !== feedGeneration) {
+          feedLoading = false;
+          if (feedReloadPending) {
+            feedReloadPending = false;
+            fetchFeedPage(document.getElementById('library-content'), true);
+          }
+          return;
+        }
         var newItems = data.items || [];
         if (data.total != null) feedTotal = data.total;
         if (data.counts) feedCounts = data.counts;
@@ -198,6 +214,11 @@
       })
       .catch(function() {
         feedLoading = false;
+        if (requestGeneration !== feedGeneration && feedReloadPending) {
+          feedReloadPending = false;
+          fetchFeedPage(document.getElementById('library-content'), true);
+          return;
+        }
         if (initial) {
           clearChildren(content);
           content.appendChild(el('div', 'state-msg error', 'Failed to load library.'));

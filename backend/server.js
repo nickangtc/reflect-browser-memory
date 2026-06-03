@@ -702,6 +702,8 @@ app.get('/api/search', requireApiKey, async (req, res) => {
       return res.status(400).json({ error: 'Invalid type filter: ' + typeFilter });
     }
 
+    const likeQuery = rawQuery.replace(/[\\%_]/g, '\\$&');
+
     const result = await pool.query(`
       WITH search_query AS (
         SELECT websearch_to_tsquery('english', $1) AS query
@@ -866,20 +868,20 @@ app.get('/api/search', requireApiKey, async (req, res) => {
         SELECT
           candidates.*,
           ts_rank_cd(to_tsvector('english', COALESCE(search_text, '')), search_query.query) +
-            CASE WHEN COALESCE(title, page_title, youtube_title, '') ILIKE '%' || $1 || '%' THEN 0.4 ELSE 0 END +
-            CASE WHEN COALESCE(base_url, url, page_url, '') ILIKE '%' || $1 || '%' THEN 0.2 ELSE 0 END AS search_rank
+            CASE WHEN COALESCE(title, page_title, youtube_title, '') ILIKE '%' || $5 || '%' ESCAPE E'\\\\' THEN 0.4 ELSE 0 END +
+            CASE WHEN COALESCE(base_url, url, page_url, '') ILIKE '%' || $5 || '%' ESCAPE E'\\\\' THEN 0.2 ELSE 0 END AS search_rank
         FROM candidates, search_query
         WHERE ($4::text IS NULL OR candidates.type = $4)
           AND (
             to_tsvector('english', COALESCE(search_text, '')) @@ search_query.query
-            OR search_text ILIKE '%' || $1 || '%'
+            OR search_text ILIKE '%' || $5 || '%' ESCAPE E'\\\\'
           )
       )
       SELECT *, COUNT(*) OVER() AS total
       FROM ranked
       ORDER BY search_rank DESC, last_activity DESC
       LIMIT $2 OFFSET $3
-    `, [rawQuery, limit, offset, typeFilter]);
+    `, [rawQuery, limit, offset, typeFilter, likeQuery]);
 
     const items = result.rows.map(row => {
       const total = row.total;
