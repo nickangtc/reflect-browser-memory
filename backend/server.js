@@ -72,6 +72,49 @@ const resolveSince = (value, fallbackHours = 24) => {
   return parsed.toISOString();
 };
 
+// Search indexes all row fields via to_jsonb(row)::text so newly-added capture
+// metadata becomes searchable without hand-editing /api/search. Result cards
+// still need a compact stable column contract; validate that on startup so
+// schema drift fails early with an actionable error.
+const SEARCH_SCHEMA_CONTRACT = {
+  highlights: ['id', 'client_highlight_id', 'text', 'url', 'annotation', 'context_before', 'context_after', 'xpath', 'created_at'],
+  images: ['id', 'client_highlight_id', 'r2_url', 'url', 'page_url', 'page_title', 'width', 'height', 'context_text', 'annotation', 'created_at'],
+  notes: ['id', 'url', 'text', 'r2_url', 'created_at'],
+  read_later: ['id', 'url', 'title', 'domain', 'preview_image', 'is_read', 'created_at'],
+  youtube_annotations: ['id', 'url', 'timestamp_seconds', 'annotation', 'created_at']
+};
+
+const SEARCH_TYPES = ['image', 'highlight', 'video', 'article'];
+
+const ensureSearchSchemaCompatibility = async () => {
+  const tableNames = Object.keys(SEARCH_SCHEMA_CONTRACT);
+  const result = await pool.query(
+    `SELECT table_name, column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [tableNames]
+  );
+
+  const existing = {};
+  result.rows.forEach(row => {
+    if (!existing[row.table_name]) existing[row.table_name] = new Set();
+    existing[row.table_name].add(row.column_name);
+  });
+
+  const missing = [];
+  Object.entries(SEARCH_SCHEMA_CONTRACT).forEach(([table, columns]) => {
+    columns.forEach(column => {
+      if (!existing[table] || !existing[table].has(column)) {
+        missing.push(table + '.' + column);
+      }
+    });
+  });
+
+  if (missing.length > 0) {
+    throw new Error('Search schema contract is out of date. Update /api/search for missing columns: ' + missing.join(', '));
+  }
+};
+
 // Keep existing databases compatible with newer API code. Some DBs may have
 // been migrated manually, so make this small idempotent migration part of
 // startup to avoid 500s when endpoints select updated_at.
@@ -635,6 +678,233 @@ app.get('/api/feed', requireApiKey, async (req, res) => {
   } catch (error) {
     console.error('Error fetching feed:', error);
     res.status(500).json({ error: 'Failed to feed', details: error.message });
+  }
+});
+
+// Backend-owned keyword search for the new tab Library. The query searches a
+// unified document set built from explicit capture tables only; it avoids
+// passive history and automatically includes newly-added table columns through
+// row JSON text.
+app.get('/api/search', requireApiKey, async (req, res) => {
+  try {
+    const rawQuery = (req.query.q || '').trim();
+    if (!rawQuery) {
+      return res.status(400).json({ error: 'q query parameter required' });
+    }
+
+    const parsedLimit = parseInt(req.query.limit);
+    const parsedOffset = parseInt(req.query.offset);
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 40, 1), 100);
+    const offset = Math.max(Number.isFinite(parsedOffset) ? parsedOffset : 0, 0);
+    const typeFilter = req.query.type || null;
+
+    if (typeFilter && SEARCH_TYPES.indexOf(typeFilter) === -1) {
+      return res.status(400).json({ error: 'Invalid type filter: ' + typeFilter });
+    }
+
+    const likeQuery = rawQuery.replace(/[\\%_]/g, '\\$&');
+
+    const result = await pool.query(`
+      WITH search_query AS (
+        SELECT websearch_to_tsquery('english', $1) AS query
+      ),
+      article_events AS (
+        SELECT
+          h.url AS base_url,
+          NULL::text AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(h.url, '^https?://', ''), '/.*$', '') AS domain,
+          h.created_at,
+          to_jsonb(h)::text AS search_text
+        FROM highlights h
+        WHERE h.url IS NOT NULL AND h.url NOT LIKE '%youtube.com/watch%' AND h.url NOT LIKE '%youtu.be/%'
+
+        UNION ALL
+
+        SELECT
+          i.page_url AS base_url,
+          i.page_title AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(i.page_url, '^https?://', ''), '/.*$', '') AS domain,
+          i.created_at,
+          to_jsonb(i)::text AS search_text
+        FROM images i
+        WHERE i.page_url IS NOT NULL AND i.page_url != '' AND i.page_url NOT LIKE '%youtube.com/watch%' AND i.page_url NOT LIKE '%youtu.be/%'
+
+        UNION ALL
+
+        SELECT
+          n.url AS base_url,
+          NULL::text AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(n.url, '^https?://', ''), '/.*$', '') AS domain,
+          n.created_at,
+          to_jsonb(n)::text AS search_text
+        FROM notes n
+        WHERE n.url IS NOT NULL AND n.url NOT LIKE '%youtube.com/watch%' AND n.url NOT LIKE '%youtu.be/%'
+
+        UNION ALL
+
+        SELECT
+          rl.url AS base_url,
+          rl.title,
+          rl.domain,
+          rl.created_at,
+          to_jsonb(rl)::text AS search_text
+        FROM read_later rl
+        WHERE rl.url IS NOT NULL AND rl.url NOT LIKE '%youtube.com/watch%' AND rl.url NOT LIKE '%youtu.be/%'
+      ),
+      candidates AS (
+        SELECT
+          'image'::text AS type,
+          i.id,
+          NULL::text AS base_url,
+          i.r2_url,
+          i.width,
+          i.height,
+          i.context_text,
+          i.page_url,
+          i.page_title,
+          i.annotation,
+          i.client_highlight_id,
+          NULL::text AS text,
+          NULL::text AS url,
+          NULL::text AS youtube_title,
+          NULL::text AS youtube_channel,
+          NULL::bigint AS annotation_count,
+          NULL::text AS youtube_annotation,
+          NULL::bigint AS highlight_count,
+          NULL::text AS title,
+          NULL::text AS domain,
+          i.created_at AS last_activity,
+          i.created_at,
+          to_jsonb(i)::text AS search_text
+        FROM images i
+
+        UNION ALL
+
+        SELECT
+          'highlight'::text AS type,
+          h.id,
+          NULL::text AS base_url,
+          NULL::text AS r2_url,
+          NULL::integer AS width,
+          NULL::integer AS height,
+          NULL::text AS context_text,
+          NULL::text AS page_url,
+          NULL::text AS page_title,
+          h.annotation,
+          h.client_highlight_id,
+          h.text,
+          h.url,
+          NULL::text AS youtube_title,
+          NULL::text AS youtube_channel,
+          NULL::bigint AS annotation_count,
+          NULL::text AS youtube_annotation,
+          NULL::bigint AS highlight_count,
+          NULL::text AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(h.url, '^https?://', ''), '/.*$', '') AS domain,
+          h.created_at AS last_activity,
+          h.created_at,
+          to_jsonb(h)::text AS search_text
+        FROM highlights h
+
+        UNION ALL
+
+        SELECT
+          'video'::text AS type,
+          NULL::uuid AS id,
+          REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
+          NULL::text AS r2_url,
+          NULL::integer AS width,
+          NULL::integer AS height,
+          NULL::text AS context_text,
+          NULL::text AS page_url,
+          NULL::text AS page_title,
+          NULL::text AS annotation,
+          NULL::text AS client_highlight_id,
+          NULL::text AS text,
+          NULL::text AS url,
+          NULL::text AS youtube_title,
+          NULL::text AS youtube_channel,
+          COUNT(*) AS annotation_count,
+          NULL::text AS youtube_annotation,
+          NULL::bigint AS highlight_count,
+          NULL::text AS title,
+          'youtube.com'::text AS domain,
+          MAX(ya.created_at) AS last_activity,
+          MIN(ya.created_at) AS created_at,
+          string_agg(to_jsonb(ya)::text, ' ') AS search_text
+        FROM youtube_annotations ya
+        GROUP BY REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
+
+        UNION ALL
+
+        SELECT
+          'article'::text AS type,
+          NULL::uuid AS id,
+          ae.base_url,
+          NULL::text AS r2_url,
+          NULL::integer AS width,
+          NULL::integer AS height,
+          NULL::text AS context_text,
+          NULL::text AS page_url,
+          NULL::text AS page_title,
+          NULL::text AS annotation,
+          NULL::text AS client_highlight_id,
+          NULL::text AS text,
+          NULL::text AS url,
+          NULL::text AS youtube_title,
+          NULL::text AS youtube_channel,
+          NULL::bigint AS annotation_count,
+          NULL::text AS youtube_annotation,
+          COUNT(*) AS highlight_count,
+          COALESCE(MAX(NULLIF(ae.title, '')), '') AS title,
+          COALESCE(MAX(NULLIF(ae.domain, '')), '') AS domain,
+          MAX(ae.created_at) AS last_activity,
+          MIN(ae.created_at) AS created_at,
+          string_agg(ae.search_text, ' ') AS search_text
+        FROM article_events ae
+        GROUP BY ae.base_url
+      ),
+      ranked AS (
+        SELECT
+          candidates.*,
+          ts_rank_cd(to_tsvector('english', COALESCE(search_text, '')), search_query.query) +
+            CASE WHEN COALESCE(title, page_title, youtube_title, '') ILIKE '%' || $5 || '%' ESCAPE E'\\\\' THEN 0.4 ELSE 0 END +
+            CASE WHEN COALESCE(base_url, url, page_url, '') ILIKE '%' || $5 || '%' ESCAPE E'\\\\' THEN 0.2 ELSE 0 END AS search_rank
+        FROM candidates, search_query
+        WHERE ($4::text IS NULL OR candidates.type = $4)
+          AND (
+            to_tsvector('english', COALESCE(search_text, '')) @@ search_query.query
+            OR search_text ILIKE '%' || $5 || '%' ESCAPE E'\\\\'
+          )
+      )
+      SELECT *, COUNT(*) OVER() AS total
+      FROM ranked
+      ORDER BY search_rank DESC, last_activity DESC
+      LIMIT $2 OFFSET $3
+    `, [rawQuery, limit, offset, typeFilter, likeQuery]);
+
+    const items = result.rows.map(row => {
+      const total = row.total;
+      delete row.total;
+      delete row.search_text;
+      row.search_rank = Number(row.search_rank || 0);
+      if (row.annotation_count != null) row.annotation_count = parseInt(row.annotation_count);
+      if (row.highlight_count != null) row.highlight_count = parseInt(row.highlight_count);
+      row._total = total;
+      return row;
+    });
+
+    await Promise.all([
+      fetchArticlePreviews(items.filter(item => item.type === 'article')),
+      fetchVideoPreviews(items.filter(item => item.type === 'video'))
+    ]);
+
+    const total = items.length ? parseInt(items[0]._total) : 0;
+    items.forEach(item => { delete item._total; });
+    res.json({ items, total, limit, offset, query: rawQuery, mode: 'keyword' });
+  } catch (error) {
+    console.error('Error searching library:', error);
+    res.status(500).json({ error: 'Failed to search', details: error.message });
   }
 });
 
@@ -1496,6 +1766,7 @@ initializeSchema()
     ensureNotesTableCompatibility(),
     ensureContentSharesTable()
   ]))
+  .then(() => ensureSearchSchemaCompatibility())
   .then(() => {
     app.listen(port, () => {
       console.log(`🚀 Reflect backend listening on port ${port}`);

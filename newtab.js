@@ -130,6 +130,11 @@
   var feedTotal = null;
   var feedCounts = {};
   var libraryReadLaterPreviewItems = [];
+  var searchQuery = '';
+  var searchDebounce = null;
+  var searchBound = false;
+  var feedGeneration = 0;
+  var feedReloadPending = false;
 
   function loadLibrary() {
     var content = document.getElementById('library-content');
@@ -147,20 +152,52 @@
 
     fetchFeedPage(content, true);
     setupFilters();
+    setupLibrarySearch();
     setupInfiniteScroll();
     loadLibraryReadLaterPreview();
     loadSparkline();
   }
 
+  function isSearchActive() {
+    return searchQuery.trim().length > 0;
+  }
+
+  function resetLibraryFeed() {
+    feedGeneration++;
+    feedOffset = 0;
+    feedExhausted = false;
+    feedTotal = null;
+    libraryItems = [];
+    if (feedLoading) {
+      feedReloadPending = true;
+      return;
+    }
+    fetchFeedPage(document.getElementById('library-content'), true);
+  }
+
   function fetchFeedPage(content, initial) {
     if (feedLoading || feedExhausted) return;
     feedLoading = true;
+    var requestGeneration = feedGeneration;
 
-    var url = '/api/feed?limit=' + feedLimit + '&offset=' + feedOffset;
+    var url;
+    if (isSearchActive()) {
+      url = '/api/search?q=' + encodeURIComponent(searchQuery.trim()) + '&limit=' + feedLimit + '&offset=' + feedOffset;
+    } else {
+      url = '/api/feed?limit=' + feedLimit + '&offset=' + feedOffset;
+    }
     if (activeFilter !== 'all') url += '&type=' + activeFilter;
 
     apiFetch(url)
       .then(function(data) {
+        if (requestGeneration !== feedGeneration) {
+          feedLoading = false;
+          if (feedReloadPending) {
+            feedReloadPending = false;
+            fetchFeedPage(document.getElementById('library-content'), true);
+          }
+          return;
+        }
         var newItems = data.items || [];
         if (data.total != null) feedTotal = data.total;
         if (data.counts) feedCounts = data.counts;
@@ -177,6 +214,11 @@
       })
       .catch(function() {
         feedLoading = false;
+        if (requestGeneration !== feedGeneration && feedReloadPending) {
+          feedReloadPending = false;
+          fetchFeedPage(document.getElementById('library-content'), true);
+          return;
+        }
         if (initial) {
           clearChildren(content);
           content.appendChild(el('div', 'state-msg error', 'Failed to load library.'));
@@ -197,7 +239,8 @@
 
   function updateLibraryCount() {
     var countEl = document.getElementById('library-count');
-    countEl.textContent = (feedTotal != null ? feedTotal : libraryItems.length) + ' items';
+    var count = feedTotal != null ? feedTotal : libraryItems.length;
+    countEl.textContent = count + (isSearchActive() ? ' result' : ' item') + (count === 1 ? '' : 's');
   }
 
   function loadSparkline() {
@@ -355,8 +398,8 @@
     clearChildren(container);
 
     if (!libraryItems.length) {
-      container.appendChild(el('div', 'state-msg', 'No ' + (activeFilter === 'all' ? 'items' : activeFilter + 's') + ' yet.'));
-      renderLibraryReadLaterPreview(libraryReadLaterPreviewItems);
+      container.appendChild(el('div', 'state-msg', isSearchActive() ? 'No results found.' : 'No ' + (activeFilter === 'all' ? 'items' : activeFilter + 's') + ' yet.'));
+      if (!isSearchActive()) renderLibraryReadLaterPreview(libraryReadLaterPreviewItems);
       return;
     }
 
@@ -378,7 +421,7 @@
     });
 
     container.appendChild(masonry);
-    renderLibraryReadLaterPreview(libraryReadLaterPreviewItems);
+    if (!isSearchActive()) renderLibraryReadLaterPreview(libraryReadLaterPreviewItems);
   }
 
   function appendToLibrary(container, newItems) {
@@ -409,13 +452,47 @@
         filterBtns.forEach(function(b) { b.classList.remove('active'); });
         btn.classList.add('active');
         activeFilter = btn.dataset.filter;
-        // Reset and re-fetch from API with the new type filter
-        feedOffset = 0;
-        feedExhausted = false;
-        feedTotal = null;
-        libraryItems = [];
-        fetchFeedPage(document.getElementById('library-content'), true);
+        resetLibraryFeed();
       });
+    });
+  }
+
+  function setupLibrarySearch() {
+    if (searchBound) return;
+    searchBound = true;
+
+    var form = document.getElementById('library-search-form');
+    var input = document.getElementById('library-search-input');
+    var clearBtn = document.getElementById('library-search-clear');
+    if (!form || !input || !clearBtn) return;
+
+    function setQuery(value) {
+      var nextQuery = (value || '').trim();
+      form.classList.toggle('has-query', nextQuery.length > 0);
+      if (nextQuery === searchQuery) return;
+      searchQuery = nextQuery;
+      resetLibraryFeed();
+    }
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (searchDebounce) clearTimeout(searchDebounce);
+      setQuery(input.value);
+    });
+
+    input.addEventListener('input', function() {
+      form.classList.toggle('has-query', input.value.trim().length > 0);
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(function() {
+        setQuery(input.value);
+      }, 300);
+    });
+
+    clearBtn.addEventListener('click', function() {
+      input.value = '';
+      if (searchDebounce) clearTimeout(searchDebounce);
+      setQuery('');
+      input.focus();
     });
   }
 
