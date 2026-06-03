@@ -2,13 +2,135 @@
   var API_BASE = '';
   var apiKey = '';
   var apiEnabled = false;
+  var unsplashAccessKey = '';
+  var calmPhoto = null;
+  var CALM_IMAGE_KEY = 'reflect_newtab_calm_image';
+  var CALM_HISTORY_KEY = 'reflect_newtab_calm_history';
+  var CALM_HISTORY_LIMIT = 10;
+  var CALM_QUERY = 'peaceful nature landscape water forest mountains sky';
+  var calmMidnightTimer = null;
+  var FALLBACK_CALM_IMAGES = [
+    {
+      id: 'fallback-mountain-lake',
+      description: 'Still mountain lake at sunrise',
+      urls: { regular: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-forest-light',
+      description: 'Soft morning light in a quiet forest',
+      urls: { regular: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-ocean-horizon',
+      description: 'Calm ocean horizon under an open sky',
+      urls: { regular: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-meadow',
+      description: 'Open green meadow below distant mountains',
+      urls: { regular: 'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-soft-clouds',
+      description: 'A wide peaceful sky filled with soft clouds',
+      urls: { regular: 'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-quiet-river',
+      description: 'A quiet river winding through green hills',
+      urls: { regular: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-alpine-valley',
+      description: 'An alpine valley under gentle morning light',
+      urls: { regular: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-open-road',
+      description: 'An open road crossing a vast peaceful landscape',
+      urls: { regular: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-deep-woods',
+      description: 'Tall trees standing quietly in deep woods',
+      urls: { regular: 'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-soft-coast',
+      description: 'A soft coastline meeting a clear blue horizon',
+      urls: { regular: 'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    },
+    {
+      id: 'fallback-mist-valley',
+      description: 'Mist drifting over a green valley at dawn',
+      urls: { regular: 'https://images.unsplash.com/photo-1511884642898-4c92249e20b6?auto=format&fit=crop&w=2200&q=85' },
+      user: { name: 'Unsplash', links: { html: 'https://unsplash.com' } },
+      links: { html: 'https://unsplash.com' }
+    }
+  ];
+
+  function hasChromeStorage() {
+    return typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
+  }
+
+  function storageGet(keys, cb) {
+    if (hasChromeStorage()) {
+      chrome.storage.local.get(keys, cb);
+      return;
+    }
+
+    var result = {};
+    keys.forEach(function(key) {
+      var raw = localStorage.getItem(key);
+      if (raw == null) return;
+      try {
+        result[key] = JSON.parse(raw);
+      } catch(e) {
+        result[key] = raw;
+      }
+    });
+    cb(result);
+  }
+
+  function storageSet(values, cb) {
+    if (hasChromeStorage()) {
+      chrome.storage.local.set(values, cb);
+      return;
+    }
+
+    Object.keys(values).forEach(function(key) {
+      localStorage.setItem(key, JSON.stringify(values[key]));
+    });
+    if (cb) cb();
+  }
 
   // ---- Config ----
   function loadConfig(cb) {
-    chrome.storage.local.get(['apiKey', 'apiBaseUrl', 'apiEnabled'], function(r) {
+    storageGet(['apiKey', 'apiBaseUrl', 'apiEnabled', 'unsplashAccessKey'], function(r) {
       apiKey = r.apiKey || '';
       API_BASE = r.apiBaseUrl || '';
       apiEnabled = r.apiEnabled === true;
+      unsplashAccessKey = r.unsplashAccessKey || '';
       cb();
     });
   }
@@ -68,16 +190,14 @@
   var panels = document.querySelectorAll('.tab-panel');
   var loaded = { library: false, read: false, activity: false, analytics: false };
 
-  var TAB_KEY = 'reflect_newtab_active';
-
   function switchTab(name) {
     tabBtns.forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
     panels.forEach(function(p) { p.classList.toggle('active', p.id === 'panel-' + name); });
-    localStorage.setItem(TAB_KEY, name);
 
     if (!loaded[name]) {
       loaded[name] = true;
-      if (name === 'library') loadLibrary();
+      if (name === 'calm') loadCalmImage();
+      else if (name === 'library') loadLibrary();
       else if (name === 'read') loadReadLater();
       else if (name === 'activity') loadActivity();
       else if (name === 'analytics') loadAnalytics();
@@ -118,6 +238,156 @@
 
   function clearChildren(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  // ---- CALM DAILY IMAGE ----
+  function getLocalDateKey(date) {
+    var year = date.getFullYear();
+    var month = String(date.getMonth() + 1).padStart(2, '0');
+    var day = String(date.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function normalizeUnsplashPhoto(photo) {
+    return {
+      id: photo.id,
+      description: photo.description || photo.alt_description || 'A calming view of the world',
+      color: photo.color || '#1f2a2e',
+      urls: {
+        regular: photo.urls && (photo.urls.raw || photo.urls.full || photo.urls.regular)
+      },
+      user: {
+        name: photo.user && photo.user.name ? photo.user.name : 'Unsplash',
+        links: {
+          html: photo.user && photo.user.links ? photo.user.links.html : 'https://unsplash.com'
+        }
+      },
+      links: {
+        html: photo.links && photo.links.html ? photo.links.html : 'https://unsplash.com'
+      },
+      downloadLocation: photo.links && photo.links.download_location ? photo.links.download_location : ''
+    };
+  }
+
+  function buildImageUrl(photo) {
+    if (!photo || !photo.urls || !photo.urls.regular) return '';
+    if (photo.urls.regular.indexOf('images.unsplash.com') === -1) return photo.urls.regular;
+    try {
+      var url = new URL(photo.urls.regular);
+      url.searchParams.set('auto', 'format');
+      url.searchParams.set('fit', 'crop');
+      url.searchParams.set('w', '2400');
+      url.searchParams.set('q', '85');
+      return url.toString();
+    } catch(e) {
+      return photo.urls.regular;
+    }
+  }
+
+  function fetchUnsplashPhoto(history) {
+    if (!unsplashAccessKey) return Promise.reject(new Error('Unsplash access key is not configured'));
+
+    var attempts = [0, 1, 2, 3, 4];
+    var lastPhoto = null;
+
+    return attempts.reduce(function(promise) {
+      return promise.catch(function() {
+        var url = 'https://api.unsplash.com/photos/random?orientation=landscape&content_filter=high&query=' + encodeURIComponent(CALM_QUERY);
+        return fetch(url, {
+          headers: {
+            Authorization: 'Client-ID ' + unsplashAccessKey,
+            'Accept-Version': 'v1'
+          }
+        }).then(function(r) {
+          if (!r.ok) throw new Error('Unsplash HTTP ' + r.status);
+          return r.json();
+        }).then(function(photo) {
+          var normalized = normalizeUnsplashPhoto(photo);
+          lastPhoto = normalized;
+          if (history.indexOf(normalized.id) !== -1) {
+            throw new Error('Recently used image');
+          }
+          triggerUnsplashDownload(normalized);
+          return normalized;
+        });
+      });
+    }, Promise.reject(new Error('Start Unsplash attempts'))).catch(function(err) {
+      if (lastPhoto) return lastPhoto;
+      throw err;
+    });
+  }
+
+  function triggerUnsplashDownload(photo) {
+    if (!photo.downloadLocation || !unsplashAccessKey) return;
+    fetch(photo.downloadLocation + '?client_id=' + encodeURIComponent(unsplashAccessKey)).catch(function() {});
+  }
+
+  function pickFallbackPhoto(history) {
+    var choices = FALLBACK_CALM_IMAGES.filter(function(photo) {
+      return history.indexOf(photo.id) === -1;
+    });
+    if (!choices.length) choices = FALLBACK_CALM_IMAGES.slice();
+    return choices[Math.floor(Math.random() * choices.length)];
+  }
+
+  function cacheCalmPhoto(photo, dateKey, history, cb) {
+    var nextHistory = [photo.id].concat(history.filter(function(id) { return id !== photo.id; })).slice(0, CALM_HISTORY_LIMIT);
+    var values = {};
+    values[CALM_IMAGE_KEY] = { date: dateKey, photo: photo };
+    values[CALM_HISTORY_KEY] = nextHistory;
+    storageSet(values, cb);
+  }
+
+  function loadCalmImage() {
+    var today = getLocalDateKey(new Date());
+    storageGet([CALM_IMAGE_KEY, CALM_HISTORY_KEY], function(r) {
+      var cached = r[CALM_IMAGE_KEY];
+      var history = Array.isArray(r[CALM_HISTORY_KEY]) ? r[CALM_HISTORY_KEY] : [];
+
+      if (cached && cached.date === today && cached.photo) {
+        renderCalmImage(cached.photo, false);
+        return;
+      }
+
+      fetchUnsplashPhoto(history)
+        .catch(function() { return pickFallbackPhoto(history); })
+        .then(function(photo) {
+          cacheCalmPhoto(photo, today, history, function() {
+            renderCalmImage(photo, true);
+          });
+        });
+    });
+  }
+
+  function renderCalmImage(photo, isFresh) {
+    calmPhoto = photo;
+    var panel = document.getElementById('panel-calm');
+    var image = document.getElementById('calm-image');
+    var source = buildImageUrl(photo);
+
+    panel.style.backgroundColor = photo.color || '#1f2a2e';
+    image.onload = function() {
+      panel.classList.add('has-image');
+    };
+    image.src = source;
+    image.alt = photo.description;
+  }
+
+  function scheduleCalmMidnightRefresh() {
+    if (calmMidnightTimer) clearTimeout(calmMidnightTimer);
+
+    var now = new Date();
+    var nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0);
+
+    calmMidnightTimer = setTimeout(function() {
+      loaded.calm = false;
+      if (document.getElementById('panel-calm').classList.contains('active')) {
+        loaded.calm = true;
+        loadCalmImage();
+      }
+      scheduleCalmMidnightRefresh();
+    }, nextMidnight.getTime() - now.getTime());
   }
 
   // ---- LIBRARY ----
@@ -2033,7 +2303,7 @@
   // ---- Init ----
   initModal();
   loadConfig(function() {
-    var saved = localStorage.getItem(TAB_KEY) || 'library';
-    switchTab(saved);
+    switchTab('calm');
+    scheduleCalmMidnightRefresh();
   });
 })();

@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadSettings() {
-  chrome.storage.local.get(['machineId', 'apiEnabled', 'apiBaseUrl', 'apiKey'], function(result) {
+  chrome.storage.local.get(['machineId', 'apiEnabled', 'apiBaseUrl', 'apiKey', 'unsplashAccessKey'], function(result) {
     // Machine ID
     document.getElementById('machineId').textContent = result.machineId || 'Not set';
 
@@ -19,6 +19,7 @@ function loadSettings() {
     // Backend URL
     document.getElementById('apiBaseUrl').value = result.apiBaseUrl || '';
     document.getElementById('apiKey').value = result.apiKey || '';
+    document.getElementById('unsplashAccessKey').value = result.unsplashAccessKey || '';
   });
 }
 
@@ -27,6 +28,7 @@ function saveSettings() {
   const apiEnabled = document.getElementById('apiEnabled').checked;
   const apiBaseUrl = document.getElementById('apiBaseUrl').value.trim();
   const apiKey = document.getElementById('apiKey').value.trim();
+  const unsplashAccessKey = document.getElementById('unsplashAccessKey').value.trim();
 
   // Validate URL
   if (apiBaseUrl && !isValidUrl(apiBaseUrl)) {
@@ -47,7 +49,8 @@ function saveSettings() {
   chrome.storage.local.set({
     apiEnabled: apiEnabled,
     apiBaseUrl: apiBaseUrl,
-    apiKey: apiKey
+    apiKey: apiKey,
+    unsplashAccessKey: unsplashAccessKey
   }, function() {
     showStatus('Settings saved successfully!', 'success');
 

@@ -29,6 +29,14 @@ After deploy, generate/copy the backend service public URL. Then open the extens
 
 Cloudflare R2 variables are optional and only needed for image/note attachment uploads and highlighting images in articles. If configured, create an R2 bucket named `reflect-images`. If you don't want to use this, put "-" in the Railway template on first deployment, then delete those R2 variables in Railway.
 
+### 3. Optional Unsplash daily image
+
+The new tab opens to a quiet **Today** view with one calming landscape image. It rotates once per local day at midnight and remembers the last 10 image IDs to avoid repeats.
+
+For OSS installs, no key is bundled and browser extensions cannot read shell environment variables such as `UNSPLASH_ACCESS_KEY`. To use your own Unsplash account, create an Unsplash app and paste its **Access Key** into the extension options page. This setting is independent from Railway sync. If the key is blank or Unsplash is unavailable, Reflect falls back to a small curated set of public Unsplash image URLs so the new tab still works.
+
+The Today view loads images from Unsplash domains. With an access key configured, it also calls the Unsplash random photo API and records the download event required by Unsplash API usage guidelines.
+
 ## What Reflect captures
 
 - Text highlights and highlight annotations
@@ -44,6 +52,7 @@ Reflect does **not** capture general page history, browsing trails, referrers, s
 
 Reflect replaces the new tab page with:
 
+- **Today** — a distraction-light calming image that rotates daily
 - **Library** — captured highlights, articles, images, videos, notes, and sharing controls. Sharing creates public URLs and requires the backend.
 - **Read** — Read Later inbox
 - **Activity** — recent capture timeline
