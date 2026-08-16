@@ -621,7 +621,7 @@ app.get('/api/feed', requireApiKey, async (req, res) => {
 
     const videoQuery = `
       SELECT
-        COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g')) AS base_url,
+        REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g') AS base_url,
         NULL::text AS youtube_title,
         NULL::text AS youtube_channel,
         COUNT(*) AS annotation_count,
@@ -629,7 +629,7 @@ app.get('/api/feed', requireApiKey, async (req, res) => {
         MAX(created_at) AS last_activity,
         MIN(created_at) AS created_at
       FROM youtube_annotations
-      GROUP BY COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g'))
+      GROUP BY REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g')
     `;
 
     const articleQuery = articleRollupQuery();
@@ -808,7 +808,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
         SELECT
           'video'::text AS type,
           NULL::text AS id,
-          COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')) AS base_url,
+          REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
           NULL::text AS r2_url,
           NULL::integer AS width,
           NULL::integer AS height,
@@ -830,7 +830,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
           MIN(ya.created_at) AS created_at,
           string_agg(to_jsonb(ya)::text, ' ') AS search_text
         FROM youtube_annotations ya
-        GROUP BY COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g'))
+        GROUP BY REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
 
         UNION ALL
 
@@ -1288,7 +1288,7 @@ app.get('/api/library', requireApiKey, async (req, res) => {
     const [videosResult, articlesResult] = await Promise.all([
       pool.query(`
         SELECT
-          COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')) AS base_url,
+          REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
           COUNT(*) AS item_count,
           MAX(ya.created_at) AS last_activity,
           NULL::text AS title,
@@ -1297,7 +1297,7 @@ app.get('/api/library', requireApiKey, async (req, res) => {
           cs.is_public,
           'video' AS type
         FROM youtube_annotations ya
-        LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g'))
+        LEFT JOIN content_shares cs ON cs.content_url = REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
         GROUP BY base_url, cs.share_token, cs.is_public
       `),
       pool.query(articleRollupQuery({
@@ -1472,7 +1472,7 @@ app.get('/api/annotated-videos', requireApiKey, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')) AS base_url,
+        REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
         COUNT(*) AS annotation_count,
         MIN(ya.created_at) AS first_annotation,
         MAX(ya.created_at) AS last_annotation,
@@ -1481,7 +1481,7 @@ app.get('/api/annotated-videos', requireApiKey, async (req, res) => {
         cs.share_token,
         cs.is_public
       FROM youtube_annotations ya
-      LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g'))
+      LEFT JOIN content_shares cs ON cs.content_url = REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
       GROUP BY base_url, cs.share_token, cs.is_public
       ORDER BY last_annotation DESC
     `);

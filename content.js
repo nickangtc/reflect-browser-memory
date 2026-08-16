@@ -1812,10 +1812,13 @@
           if (autoClose) clearTimeout(autoClose);
           var note = input.value.trim();
           if (note) {
+            var urlObj = new URL(location.href);
+            var vParam = urlObj.searchParams.get('v');
+            var cleanVideoUrl = urlObj.origin + urlObj.pathname + (vParam ? '?v=' + vParam : '');
             safeSend({
               action: 'youtube-annotation',
               visitId: ytVisitId,
-              url: location.href,
+              url: cleanVideoUrl,
               annotation: note
             });
           }
@@ -1955,8 +1958,8 @@
 
           var annotationId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
           var urlObj = new URL(location.href);
-          urlObj.searchParams.set('t', timestampSec);
-          var urlWithTs = urlObj.toString();
+          var vParam = urlObj.searchParams.get('v');
+          var urlWithTs = urlObj.origin + urlObj.pathname + (vParam ? '?v=' + vParam + '&t=' + timestampSec : '?t=' + timestampSec);
 
           el.remove();
           if (canvas && canvas.parentNode) canvas.remove();
