@@ -1297,7 +1297,7 @@ app.get('/api/library', requireApiKey, async (req, res) => {
           cs.is_public,
           'video' AS type
         FROM youtube_annotations ya
-        LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')) OR cs.content_url = REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
+        LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g'))
         GROUP BY base_url, cs.share_token, cs.is_public
       `),
       pool.query(articleRollupQuery({
@@ -1481,7 +1481,7 @@ app.get('/api/annotated-videos', requireApiKey, async (req, res) => {
         cs.share_token,
         cs.is_public
       FROM youtube_annotations ya
-      LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')) OR cs.content_url = REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
+      LEFT JOIN content_shares cs ON cs.content_url = COALESCE('https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '[&?]v=([^&#]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM 'youtu\\.be/([^?#&]+)'), 'https://www.youtube.com/watch?v=' || SUBSTRING(ya.url FROM '/shorts/([^?#&]+)'), REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g'))
       GROUP BY base_url, cs.share_token, cs.is_public
       ORDER BY last_annotation DESC
     `);
