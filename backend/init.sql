@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS youtube_annotations (
   url TEXT NOT NULL,
   timestamp_seconds INTEGER,
   annotation TEXT NOT NULL,
+  draw_data JSONB,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   processed BOOLEAN DEFAULT FALSE,

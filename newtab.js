@@ -1376,6 +1376,15 @@
           });
           row.appendChild(tsBtn);
 
+          if (ann.draw_data && ann.draw_data.length > 0) {
+            var drawIcon = el('span', 'annotation-draw-icon', ' ✏️');
+            drawIcon.title = 'Contains drawing';
+            drawIcon.style.marginRight = '8px';
+            drawIcon.style.fontSize = '12px';
+            drawIcon.style.opacity = '0.7';
+            row.appendChild(drawIcon);
+          }
+
           var textSpan = el('span', 'annotation-text modal-editable');
           textSpan.textContent = ann.annotation;
           textSpan.contentEditable = 'true';

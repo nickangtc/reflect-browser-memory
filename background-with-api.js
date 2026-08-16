@@ -273,7 +273,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
       client_visit_id: msg.visitId,
       url: msg.url,
       timestamp_seconds: msg.timestampSeconds,
-      annotation: msg.annotation
+      annotation: msg.annotation,
+      draw_data: msg.drawData
     }).then(function (result) {
       reply({ ok: !!result, synced: !!result, offline: !result, id: result ? result.id : null });
     });

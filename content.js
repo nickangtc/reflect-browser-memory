@@ -1407,6 +1407,7 @@
       // -- Annotation markers on YouTube timeline --
       var reflectMarkerContainer = null;
       var reflectOverlayEl = null;
+      var reflectDrawOverlayEl = null;
       var reflectOverlayTimer = null;
       var reflectAnnotations = [];
       var reflectLastShownId = null;
@@ -1606,6 +1607,44 @@
         player.style.position = 'relative';
         player.appendChild(reflectOverlayEl);
 
+        // Render drawing data if present
+        if (ann.draw_data && ann.draw_data.length > 0) {
+          reflectDrawOverlayEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          reflectDrawOverlayEl.style.position = 'absolute';
+          reflectDrawOverlayEl.style.top = '0';
+          reflectDrawOverlayEl.style.left = '0';
+          reflectDrawOverlayEl.style.width = '100%';
+          reflectDrawOverlayEl.style.height = '100%';
+          reflectDrawOverlayEl.style.pointerEvents = 'none'; // pass clicks through
+          reflectDrawOverlayEl.style.zIndex = '9999997'; // just below text overlay
+          
+          reflectDrawOverlayEl.setAttribute('viewBox', '0 0 10000 10000');
+          reflectDrawOverlayEl.setAttribute('preserveAspectRatio', 'none');
+
+          ann.draw_data.forEach(function (stroke) {
+            if (stroke.length > 0) {
+              var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+              var d = '';
+              stroke.forEach(function (pt, i) {
+                // pt[0] and pt[1] are normalized coordinates (0 to 1)
+                var px = pt[0] * 10000;
+                var py = pt[1] * 10000;
+                if (i === 0) d += 'M ' + px + ' ' + py + ' ';
+                else d += 'L ' + px + ' ' + py + ' ';
+              });
+              path.setAttribute('d', d.trim());
+              path.setAttribute('stroke', '#fbbf24');
+              path.setAttribute('stroke-width', '3');
+              path.setAttribute('fill', 'none');
+              path.setAttribute('stroke-linecap', 'round');
+              path.setAttribute('stroke-linejoin', 'round');
+              path.setAttribute('vector-effect', 'non-scaling-stroke'); // Keeps line width consistent
+              reflectDrawOverlayEl.appendChild(path);
+            }
+          });
+          player.appendChild(reflectDrawOverlayEl);
+        }
+
         if (reflectOverlayTimer) clearTimeout(reflectOverlayTimer);
         reflectOverlayTimer = setTimeout(hideAnnotationOverlay, 6000);
       }
@@ -1616,6 +1655,10 @@
           reflectOverlayEl.remove();
         }
         reflectOverlayEl = null;
+        if (reflectDrawOverlayEl && reflectDrawOverlayEl.parentNode) {
+          reflectDrawOverlayEl.remove();
+        }
+        reflectDrawOverlayEl = null;
       }
 
       function enterEditMode(ann, video) {
@@ -1822,7 +1865,7 @@
 
         var input = document.createElement('input');
         input.type = 'text';
-        input.placeholder = 'Annotate this moment...';
+        input.placeholder = 'Annotate this moment (draw on video)...';
 
         var dismiss = document.createElement('button');
         dismiss.className = 'hltr-note-dismiss';
@@ -1834,6 +1877,78 @@
         document.body.appendChild(el);
         setTimeout(function () { input.focus(); }, 100);
 
+        // -- Setup Drawing Canvas --
+        var strokes = [];
+        var currentStroke = null;
+        var canvas = document.createElement('canvas');
+        var player = document.querySelector('.html5-video-player') || video.parentElement;
+        var ctx = canvas.getContext('2d');
+        var isDrawing = false;
+
+        if (player) {
+          canvas.className = 'reflect-draw-canvas';
+          canvas.style.position = 'absolute';
+          canvas.style.top = '0';
+          canvas.style.left = '0';
+          canvas.style.width = '100%';
+          canvas.style.height = '100%';
+          canvas.style.zIndex = '9999998'; // Just below prompt
+          canvas.style.cursor = 'crosshair';
+          
+          var rect = player.getBoundingClientRect();
+          canvas.width = rect.width;
+          canvas.height = rect.height;
+          
+          ctx.strokeStyle = '#fbbf24'; // Yellow
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          player.appendChild(canvas);
+
+          canvas.addEventListener('mousedown', function (e) {
+            isDrawing = true;
+            var rect = canvas.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var y = e.clientY - rect.top;
+            currentStroke = [[x / canvas.width, y / canvas.height]];
+            
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+          });
+
+          canvas.addEventListener('mousemove', function (e) {
+            if (!isDrawing) return;
+            var rect = canvas.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var y = e.clientY - rect.top;
+            currentStroke.push([x / canvas.width, y / canvas.height]);
+            
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          });
+
+          canvas.addEventListener('mouseup', function () {
+            if (isDrawing) {
+              isDrawing = false;
+              if (currentStroke && currentStroke.length > 0) {
+                strokes.push(currentStroke);
+              }
+              currentStroke = null;
+            }
+          });
+
+          canvas.addEventListener('mouseleave', function () {
+            if (isDrawing) {
+              isDrawing = false;
+              if (currentStroke && currentStroke.length > 0) {
+                strokes.push(currentStroke);
+              }
+              currentStroke = null;
+            }
+          });
+        }
+
         function submit() {
           var note = input.value.trim();
           if (!note) { close(); return; }
@@ -1844,15 +1959,22 @@
           var urlWithTs = urlObj.toString();
 
           el.remove();
+          if (canvas && canvas.parentNode) canvas.remove();
 
-          safeSend({
+          var payload = {
             action: 'youtube-timestamp-annotation',
             annotationId: annotationId,
             visitId: ytVisitId,
             url: urlWithTs,
             timestampSeconds: timestampSec,
             annotation: note
-          }, function (response) {
+          };
+          
+          if (strokes.length > 0) {
+            payload.drawData = strokes;
+          }
+
+          safeSend(payload, function (response) {
             if (response && response.synced) {
               showToast('Saved @ ' + formatTimestamp(timestampSec), 'success', 1500);
               // Add dot to timeline immediately
@@ -1861,6 +1983,7 @@
                 timestamp_seconds: timestampSec,
                 annotation: note
               };
+              if (strokes.length > 0) newAnn.draw_data = strokes;
               reflectAnnotations.push(newAnn);
               reflectAnnotations.sort(function (a, b) { return a.timestamp_seconds - b.timestamp_seconds; });
               renderMarkerDots(video);
@@ -1879,6 +2002,7 @@
 
         function close() {
           el.remove();
+          if (canvas && canvas.parentNode) canvas.remove();
           if (!wasPaused) video.play();
         }
 

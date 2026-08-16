@@ -80,11 +80,74 @@ const SEARCH_SCHEMA_CONTRACT = {
   highlights: ['id', 'client_highlight_id', 'text', 'url', 'annotation', 'context_before', 'context_after', 'xpath', 'created_at'],
   images: ['id', 'client_highlight_id', 'r2_url', 'url', 'page_url', 'page_title', 'width', 'height', 'context_text', 'annotation', 'created_at'],
   notes: ['id', 'url', 'text', 'r2_url', 'created_at'],
-  read_later: ['id', 'url', 'title', 'domain', 'preview_image', 'is_read', 'created_at'],
   youtube_annotations: ['id', 'url', 'timestamp_seconds', 'annotation', 'created_at']
 };
 
 const SEARCH_TYPES = ['image', 'highlight', 'video', 'article'];
+
+const articleEventsCte = (includeSearchText = false) => {
+  const searchTextColumn = includeSearchText ? ',\n        source.search_text' : '';
+
+  return `
+    article_events AS (
+      SELECT
+        source.base_url,
+        source.title,
+        source.domain,
+        source.created_at${searchTextColumn}
+      FROM (
+        SELECT
+          h.url AS base_url,
+          NULL::text AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(h.url, '^https?://', ''), '/.*$', '') AS domain,
+          h.created_at,
+          to_jsonb(h)::text AS search_text
+        FROM highlights h
+        WHERE h.url IS NOT NULL AND h.url NOT LIKE '%youtube.com/watch%' AND h.url NOT LIKE '%youtu.be/%'
+
+        UNION ALL
+
+        SELECT
+          i.page_url AS base_url,
+          i.page_title AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(i.page_url, '^https?://', ''), '/.*$', '') AS domain,
+          i.created_at,
+          to_jsonb(i)::text AS search_text
+        FROM images i
+        WHERE i.page_url IS NOT NULL AND i.page_url != '' AND i.page_url NOT LIKE '%youtube.com/watch%' AND i.page_url NOT LIKE '%youtu.be/%'
+
+        UNION ALL
+
+        SELECT
+          n.url AS base_url,
+          NULL::text AS title,
+          REGEXP_REPLACE(REGEXP_REPLACE(n.url, '^https?://', ''), '/.*$', '') AS domain,
+          n.created_at,
+          to_jsonb(n)::text AS search_text
+        FROM notes n
+        WHERE n.url IS NOT NULL AND n.url NOT LIKE '%youtube.com/watch%' AND n.url NOT LIKE '%youtu.be/%'
+      ) source
+    )
+  `;
+};
+
+const articleRollupQuery = ({ includeSearchText = false, countAlias = 'highlight_count', domainAlias = 'domain', includeShare = false } = {}) => `
+  WITH ${articleEventsCte(includeSearchText)}
+  SELECT
+    ae.base_url,
+    COALESCE(MAX(NULLIF(ae.title, '')), '') AS title,
+    COALESCE(MAX(NULLIF(ae.domain, '')), '') AS ${domainAlias},
+    COUNT(*) AS ${countAlias},
+    MAX(ae.created_at) AS last_activity,
+    MIN(ae.created_at) AS created_at${includeSearchText ? `,
+    string_agg(ae.search_text, ' ') AS search_text` : ''}${includeShare ? `,
+    cs.share_token,
+    cs.is_public,
+    'article' AS type` : ''}
+  FROM article_events ae${includeShare ? `
+  LEFT JOIN content_shares cs ON cs.content_url = ae.base_url` : ''}
+  GROUP BY ae.base_url${includeShare ? ', cs.share_token, cs.is_public' : ''}
+`;
 
 const ensureSearchSchemaCompatibility = async () => {
   const tableNames = Object.keys(SEARCH_SCHEMA_CONTRACT);
@@ -156,7 +219,8 @@ const ensureAnnotatedContentUpdatedAt = async () => {
   `);
   await pool.query(`
     ALTER TABLE IF EXISTS youtube_annotations
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS draw_data JSONB
   `);
   await pool.query(`
     UPDATE highlights
@@ -334,7 +398,7 @@ app.get('/api/youtube-annotations', requireApiKey, async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, machine_id, client_annotation_id, timestamp_seconds, annotation, created_at, updated_at
+      `SELECT id, machine_id, client_annotation_id, timestamp_seconds, annotation, draw_data, created_at, updated_at
        FROM youtube_annotations
        WHERE url LIKE $1
        ${sinceIso ? 'AND updated_at > $2' : ''}
@@ -425,23 +489,26 @@ app.put('/api/youtube-annotation/:id', requireApiKey, async (req, res) => {
 // Save YouTube timestamp annotation
 app.post('/api/youtube-annotation', requireApiKey, async (req, res) => {
   try {
-    const { machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation } = req.body;
+    const { machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, draw_data } = req.body;
 
     if (!client_annotation_id || !annotation) {
       return res.status(400).json({ error: 'client_annotation_id and annotation required' });
     }
 
+    const drawDataJson = draw_data ? JSON.stringify(draw_data) : null;
+
     const result = await pool.query(
-      `INSERT INTO youtube_annotations (machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `INSERT INTO youtube_annotations (machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, draw_data, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (machine_id, client_annotation_id) WHERE client_annotation_id IS NOT NULL
        DO UPDATE SET
          annotation = EXCLUDED.annotation,
+         draw_data = EXCLUDED.draw_data,
          updated_at = NOW(),
          processed = FALSE,
          processed_at = NULL
        RETURNING id, created_at, updated_at`,
-      [machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation]
+      [machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, drawDataJson]
     );
 
     res.json({ success: true, id: result.rows[0].id, created_at: result.rows[0].created_at });
@@ -465,7 +532,7 @@ app.get('/api/timeline', requireApiKey, async (req, res) => {
         [since]
       ),
       pool.query(
-        `SELECT id, url, timestamp_seconds, annotation, created_at FROM youtube_annotations
+        `SELECT id, url, timestamp_seconds, annotation, draw_data, created_at FROM youtube_annotations
          WHERE created_at > $1
          ORDER BY created_at DESC`,
         [since]
@@ -565,35 +632,7 @@ app.get('/api/feed', requireApiKey, async (req, res) => {
       GROUP BY REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g')
     `;
 
-    const articleQuery = `
-      WITH article_events AS (
-        SELECT url AS base_url, NULL::text AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain,
-          created_at
-        FROM highlights
-        WHERE url IS NOT NULL AND url NOT LIKE '%youtube.com/watch%' AND url NOT LIKE '%youtu.be/%'
-        UNION ALL
-        SELECT page_url AS base_url, page_title AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(page_url, '^https?://', ''), '/.*$', '') AS domain,
-          created_at
-        FROM images
-        WHERE page_url IS NOT NULL AND page_url != '' AND page_url NOT LIKE '%youtube.com/watch%' AND page_url NOT LIKE '%youtu.be/%'
-        UNION ALL
-        SELECT url AS base_url, NULL::text AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain,
-          created_at
-        FROM notes
-        WHERE url IS NOT NULL AND url NOT LIKE '%youtube.com/watch%' AND url NOT LIKE '%youtu.be/%'
-      )
-      SELECT base_url,
-        COALESCE(MAX(NULLIF(title, '')), '') AS title,
-        COALESCE(MAX(NULLIF(domain, '')), '') AS domain,
-        COUNT(*) AS highlight_count,
-        MAX(created_at) AS last_activity,
-        MIN(created_at) AS created_at
-      FROM article_events
-      GROUP BY base_url
-    `;
+    const articleQuery = articleRollupQuery();
 
     if (typeFilter) {
       let result, countResult;
@@ -708,49 +747,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
       WITH search_query AS (
         SELECT websearch_to_tsquery('english', $1) AS query
       ),
-      article_events AS (
-        SELECT
-          h.url AS base_url,
-          NULL::text AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(h.url, '^https?://', ''), '/.*$', '') AS domain,
-          h.created_at,
-          to_jsonb(h)::text AS search_text
-        FROM highlights h
-        WHERE h.url IS NOT NULL AND h.url NOT LIKE '%youtube.com/watch%' AND h.url NOT LIKE '%youtu.be/%'
-
-        UNION ALL
-
-        SELECT
-          i.page_url AS base_url,
-          i.page_title AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(i.page_url, '^https?://', ''), '/.*$', '') AS domain,
-          i.created_at,
-          to_jsonb(i)::text AS search_text
-        FROM images i
-        WHERE i.page_url IS NOT NULL AND i.page_url != '' AND i.page_url NOT LIKE '%youtube.com/watch%' AND i.page_url NOT LIKE '%youtu.be/%'
-
-        UNION ALL
-
-        SELECT
-          n.url AS base_url,
-          NULL::text AS title,
-          REGEXP_REPLACE(REGEXP_REPLACE(n.url, '^https?://', ''), '/.*$', '') AS domain,
-          n.created_at,
-          to_jsonb(n)::text AS search_text
-        FROM notes n
-        WHERE n.url IS NOT NULL AND n.url NOT LIKE '%youtube.com/watch%' AND n.url NOT LIKE '%youtu.be/%'
-
-        UNION ALL
-
-        SELECT
-          rl.url AS base_url,
-          rl.title,
-          rl.domain,
-          rl.created_at,
-          to_jsonb(rl)::text AS search_text
-        FROM read_later rl
-        WHERE rl.url IS NOT NULL AND rl.url NOT LIKE '%youtube.com/watch%' AND rl.url NOT LIKE '%youtu.be/%'
-      ),
+      ${articleEventsCte(true)},
       candidates AS (
         SELECT
           'image'::text AS type,
@@ -876,9 +873,34 @@ app.get('/api/search', requireApiKey, async (req, res) => {
             to_tsvector('english', COALESCE(search_text, '')) @@ search_query.query
             OR search_text ILIKE '%' || $5 || '%' ESCAPE E'\\\\'
           )
+      ),
+      grouped AS (
+        SELECT *
+        FROM (
+          SELECT
+            ranked.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY
+                CASE
+                  WHEN $4::text IS NULL
+                    AND ranked.type IN ('article', 'highlight', 'image')
+                    AND COALESCE(ranked.base_url, ranked.url, ranked.page_url, '') != ''
+                    AND COALESCE(ranked.base_url, ranked.url, ranked.page_url, '') NOT LIKE '%youtube.com/watch%'
+                    AND COALESCE(ranked.base_url, ranked.url, ranked.page_url, '') NOT LIKE '%youtu.be/%'
+                  THEN 'article:' || COALESCE(ranked.base_url, ranked.url, ranked.page_url, '')
+                  ELSE ranked.type || ':' || COALESCE(ranked.id, ranked.base_url, ranked.url, ranked.page_url, '')
+                END
+              ORDER BY
+                CASE WHEN ranked.type = 'article' THEN 0 ELSE 1 END,
+                ranked.search_rank DESC,
+                ranked.last_activity DESC
+            ) AS group_rank
+          FROM ranked
+        ) grouped_candidates
+        WHERE group_rank = 1
       )
       SELECT *, COUNT(*) OVER() AS total
-      FROM ranked
+      FROM grouped
       ORDER BY search_rank DESC, last_activity DESC
       LIMIT $2 OFFSET $3
     `, [rawQuery, limit, offset, typeFilter, likeQuery]);
@@ -886,6 +908,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
     const items = result.rows.map(row => {
       const total = row.total;
       delete row.total;
+      delete row.group_rank;
       delete row.search_text;
       row.search_rank = Number(row.search_rank || 0);
       if (row.annotation_count != null) row.annotation_count = parseInt(row.annotation_count);
@@ -1277,36 +1300,11 @@ app.get('/api/library', requireApiKey, async (req, res) => {
         LEFT JOIN content_shares cs ON cs.content_url = REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g')
         GROUP BY base_url, cs.share_token, cs.is_public
       `),
-      pool.query(`
-        WITH article_events AS (
-          SELECT url AS base_url, NULL::text AS title,
-            REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain,
-            created_at
-          FROM highlights WHERE url IS NOT NULL AND url NOT LIKE '%youtube.com/watch%' AND url NOT LIKE '%youtu.be/%'
-          UNION ALL
-          SELECT page_url AS base_url, page_title AS title,
-            REGEXP_REPLACE(REGEXP_REPLACE(page_url, '^https?://', ''), '/.*$', '') AS domain,
-            created_at
-          FROM images WHERE page_url IS NOT NULL AND page_url != '' AND page_url NOT LIKE '%youtube.com/watch%' AND page_url NOT LIKE '%youtu.be/%'
-          UNION ALL
-          SELECT url AS base_url, NULL::text AS title,
-            REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain,
-            created_at
-          FROM notes WHERE url IS NOT NULL AND url NOT LIKE '%youtube.com/watch%' AND url NOT LIKE '%youtu.be/%'
-        )
-        SELECT
-          ae.base_url,
-          COUNT(*) AS item_count,
-          MAX(ae.created_at) AS last_activity,
-          COALESCE(MAX(NULLIF(ae.title, '')), '') AS title,
-          COALESCE(MAX(NULLIF(ae.domain, '')), '') AS subtitle,
-          cs.share_token,
-          cs.is_public,
-          'article' AS type
-        FROM article_events ae
-        LEFT JOIN content_shares cs ON cs.content_url = ae.base_url
-        GROUP BY ae.base_url, cs.share_token, cs.is_public
-      `)
+      pool.query(articleRollupQuery({
+        countAlias: 'item_count',
+        domainAlias: 'subtitle',
+        includeShare: true
+      }))
     ]);
 
     const items = [...videosResult.rows, ...articlesResult.rows];
