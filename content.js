@@ -235,13 +235,14 @@
       '  to { transform: translateX(-50%) translateY(0); opacity: 1; }',
       '}',
       '.hltr-note-prompt label { white-space: nowrap; font-weight: 500; }',
-      '.hltr-note-prompt input {',
+      '.hltr-note-prompt input, .hltr-note-prompt textarea {',
       '  flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);',
       '  border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 13px;',
-      '  outline: none; min-width: 0;',
+      '  font-family: inherit; line-height: 1.4; outline: none; min-width: 0; box-sizing: border-box;',
       '}',
-      '.hltr-note-prompt input::placeholder { color: rgba(255,255,255,0.4); }',
-      '.hltr-note-prompt input:focus { border-color: rgba(255,255,255,0.5); }',
+      '.hltr-note-prompt textarea { resize: none; overflow-y: hidden; }',
+      '.hltr-note-prompt input::placeholder, .hltr-note-prompt textarea::placeholder { color: rgba(255,255,255,0.4); }',
+      '.hltr-note-prompt input:focus, .hltr-note-prompt textarea:focus { border-color: rgba(255,255,255,0.5); }',
       '.hltr-note-prompt .hltr-note-dismiss {',
       '  background: none; border: none; color: rgba(255,255,255,0.4);',
       '  cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1;',
@@ -1257,7 +1258,7 @@
           '}',
           '.reflect-annotation-overlay .reflect-text {',
           '  flex: 1; min-width: 0; line-height: 1.4;',
-          '  max-height: 80px; overflow-y: auto; word-wrap: break-word;',
+          '  max-height: 14em; overflow-y: auto; overflow-wrap: anywhere;',
           '}',
           '.reflect-annotation-overlay .reflect-edit-btn,',
           '.reflect-annotation-overlay .reflect-delete-btn,',
@@ -1275,7 +1276,8 @@
           '.reflect-annotation-overlay .reflect-edit-input {',
           '  flex: 1; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);',
           '  border-radius: 5px; padding: 4px 8px; color: #fff; font-size: 13px;',
-          '  font-family: inherit; outline: none; min-width: 180px;',
+          '  font-family: inherit; line-height: 1.4; outline: none; min-width: 180px;',
+          '  box-sizing: border-box; resize: none; overflow-y: hidden;',
           '}',
           '.reflect-annotation-overlay .reflect-edit-input:focus {',
           '  border-color: #fbbf24;',
@@ -1674,10 +1676,11 @@
         ts.className = 'reflect-ts';
         ts.textContent = formatTimestamp(ann.timestamp_seconds);
 
-        var input = document.createElement('input');
-        input.type = 'text';
+        var input = document.createElement('textarea');
+        input.rows = 1;
         input.className = 'reflect-edit-input';
         input.value = ann.annotation;
+        input.addEventListener('input', function () { autoSizeAnnotationTextarea(input); });
 
         var saveBtn = document.createElement('button');
         saveBtn.className = 'reflect-save-btn';
@@ -1730,7 +1733,11 @@
         reflectOverlayEl.appendChild(saveBtn);
         reflectOverlayEl.appendChild(cancelBtn);
 
-        setTimeout(function () { input.focus(); input.select(); }, 50);
+        setTimeout(function () {
+          autoSizeAnnotationTextarea(input);
+          input.focus();
+          input.select();
+        }, 50);
       }
 
       function deleteAnnotation(ann, video) {
@@ -1775,6 +1782,20 @@
         });
       }
 
+      function autoSizeAnnotationTextarea(textarea) {
+        textarea.style.height = 'auto';
+        var styles = window.getComputedStyle(textarea);
+        var lineHeight = parseFloat(styles.lineHeight) || 18.2;
+        var chromeHeight = (parseFloat(styles.paddingTop) || 0) +
+          (parseFloat(styles.paddingBottom) || 0) +
+          (parseFloat(styles.borderTopWidth) || 0) +
+          (parseFloat(styles.borderBottomWidth) || 0);
+        var maxHeight = (lineHeight * 10) + chromeHeight;
+        var nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+        textarea.style.height = nextHeight + 'px';
+        textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+      }
+
       function showYtPrompt(ytVisitId, video) {
         // Pause autoplay so user can finish reflecting
         if (video && !video.paused) video.pause();
@@ -1786,9 +1807,10 @@
         var label = document.createElement('label');
         label.textContent = 'Reflect';
 
-        var input = document.createElement('input');
-        input.type = 'text';
+        var input = document.createElement('textarea');
+        input.rows = 1;
         input.placeholder = 'What did you learn from this video?';
+        input.addEventListener('input', function () { autoSizeAnnotationTextarea(input); });
 
         var dismiss = document.createElement('button');
         dismiss.className = 'hltr-note-dismiss';
@@ -1866,9 +1888,10 @@
         label.textContent = formatTimestamp(timestampSec);
         label.style.color = '#fbbf24';
 
-        var input = document.createElement('input');
-        input.type = 'text';
+        var input = document.createElement('textarea');
+        input.rows = 1;
         input.placeholder = 'Annotate this moment (draw on video)...';
+        input.addEventListener('input', function () { autoSizeAnnotationTextarea(input); });
 
         var dismiss = document.createElement('button');
         dismiss.className = 'hltr-note-dismiss';
