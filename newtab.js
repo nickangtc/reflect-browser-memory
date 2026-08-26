@@ -190,7 +190,7 @@
   var panels = document.querySelectorAll('.tab-panel');
   var loaded = { library: false, read: false, activity: false, analytics: false };
 
-  function switchTab(name) {
+  function switchTab(name, isInteraction) {
     tabBtns.forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
     panels.forEach(function(p) { p.classList.toggle('active', p.id === 'panel-' + name); });
 
@@ -202,10 +202,14 @@
       else if (name === 'activity') loadActivity();
       else if (name === 'analytics') loadAnalytics();
     }
+
+    if (isInteraction) {
+      storageSet({ reflect_last_tab: { name: name, time: Date.now() } });
+    }
   }
 
   tabBtns.forEach(function(btn) {
-    btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
+    btn.addEventListener('click', function() { switchTab(btn.dataset.tab, true); });
   });
 
   // ---- Utilities ----
@@ -952,7 +956,7 @@
     var header = el('div', 'read-later-preview-header');
     header.appendChild(el('div', 'read-later-preview-title', 'Reading List'));
     var seeAll = el('a', 'read-later-preview-link', 'See all');
-    seeAll.addEventListener('click', function() { switchTab('read'); });
+    seeAll.addEventListener('click', function() { switchTab('read', true); });
     header.appendChild(seeAll);
     section.appendChild(header);
 
@@ -2312,7 +2316,20 @@
   // ---- Init ----
   initModal();
   loadConfig(function() {
-    switchTab('calm');
-    scheduleCalmMidnightRefresh();
+    storageGet(['reflect_last_tab'], function(r) {
+      var lastTab = r.reflect_last_tab;
+      var defaultTab = 'calm';
+      
+      if (lastTab && lastTab.time) {
+        if (Date.now() - lastTab.time < 24 * 60 * 60 * 1000) {
+          defaultTab = lastTab.name;
+        } else {
+          storageSet({ reflect_last_tab: null });
+        }
+      }
+      
+      switchTab(defaultTab);
+      scheduleCalmMidnightRefresh();
+    });
   });
 })();
