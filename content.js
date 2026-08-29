@@ -235,14 +235,14 @@
       '  to { transform: translateX(-50%) translateY(0); opacity: 1; }',
       '}',
       '.hltr-note-prompt label { white-space: nowrap; font-weight: 500; }',
-      '.hltr-note-prompt input, .hltr-note-prompt textarea {',
+      '.hltr-note-prompt textarea {',
       '  flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);',
       '  border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 13px;',
       '  font-family: inherit; line-height: 1.4; outline: none; min-width: 0; box-sizing: border-box;',
+      '  resize: none; overflow-y: hidden;',
       '}',
-      '.hltr-note-prompt textarea { resize: none; overflow-y: hidden; }',
-      '.hltr-note-prompt input::placeholder, .hltr-note-prompt textarea::placeholder { color: rgba(255,255,255,0.4); }',
-      '.hltr-note-prompt input:focus, .hltr-note-prompt textarea:focus { border-color: rgba(255,255,255,0.5); }',
+      '.hltr-note-prompt textarea::placeholder { color: rgba(255,255,255,0.4); }',
+      '.hltr-note-prompt textarea:focus { border-color: rgba(255,255,255,0.5); }',
       '.hltr-note-prompt .hltr-note-dismiss {',
       '  background: none; border: none; color: rgba(255,255,255,0.4);',
       '  cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1;',
@@ -284,6 +284,20 @@
     }
   }
 
+  function autoSizeAnnotationTextarea(textarea) {
+    textarea.style.height = 'auto';
+    var styles = window.getComputedStyle(textarea);
+    var lineHeight = parseFloat(styles.lineHeight) || 18.2;
+    var chromeHeight = (parseFloat(styles.paddingTop) || 0) +
+      (parseFloat(styles.paddingBottom) || 0) +
+      (parseFloat(styles.borderTopWidth) || 0) +
+      (parseFloat(styles.borderBottomWidth) || 0);
+    var maxHeight = (lineHeight * 10) + chromeHeight;
+    var nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = nextHeight + 'px';
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
   function showNotePrompt(id, pk) {
     hideNotePrompt();
     noteHighlightId = id;
@@ -295,9 +309,10 @@
     var label = document.createElement('label');
     label.textContent = 'Note';
 
-    var input = document.createElement('input');
-    input.type = 'text';
+    var input = document.createElement('textarea');
+    input.rows = 1;
     input.placeholder = 'Why did this stand out?';
+    input.addEventListener('input', function () { autoSizeAnnotationTextarea(input); });
 
     var dismiss = document.createElement('button');
     dismiss.className = 'hltr-note-dismiss';
@@ -1780,20 +1795,6 @@
             }
           }
         });
-      }
-
-      function autoSizeAnnotationTextarea(textarea) {
-        textarea.style.height = 'auto';
-        var styles = window.getComputedStyle(textarea);
-        var lineHeight = parseFloat(styles.lineHeight) || 18.2;
-        var chromeHeight = (parseFloat(styles.paddingTop) || 0) +
-          (parseFloat(styles.paddingBottom) || 0) +
-          (parseFloat(styles.borderTopWidth) || 0) +
-          (parseFloat(styles.borderBottomWidth) || 0);
-        var maxHeight = (lineHeight * 10) + chromeHeight;
-        var nextHeight = Math.min(textarea.scrollHeight, maxHeight);
-        textarea.style.height = nextHeight + 'px';
-        textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
       }
 
       function showYtPrompt(ytVisitId, video) {
