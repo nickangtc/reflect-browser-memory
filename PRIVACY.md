@@ -5,7 +5,9 @@ Reflect is designed as a narrow personal capture tool, not a browsing tracker.
 ## Stored locally by default
 
 - Text highlights are saved to `chrome.storage.local` immediately.
+- YouTube video IDs are saved locally after playback reaches the reflection point so repeat watches are not interrupted by another reflection prompt.
 - Backend sync is disabled on fresh install until you enable it in settings.
+- Watched-video memory is not synced as visit history. When backend sync is enabled, existing annotations may be queried to recognize a previously watched video.
 - If sync is disabled or no backend URL/API key is configured, highlights remain local and are not sent to any server.
 
 ## Synced only when you configure a backend

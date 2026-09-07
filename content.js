@@ -1212,6 +1212,13 @@
     if (domain === 'youtube.com') {
       var ytPollInterval = null;
       var ytVisitId = null;
+      var ytTrackingGeneration = 0;
+
+      function currentYouTubeVideoUrl() {
+        var urlObj = new URL(location.href);
+        var videoId = urlObj.searchParams.get('v');
+        return videoId ? urlObj.origin + '/watch?v=' + videoId : null;
+      }
 
       // -- Annotation markers styles --
       (function injectAnnotationMarkerStyles() {
@@ -1308,33 +1315,56 @@
           '  cursor: pointer; font-size: 12px; padding: 3px 6px; flex-shrink: 0;',
           '}',
           '.reflect-annotation-overlay .reflect-cancel-btn:hover { color: #fff; }',
-          // Watched-before badge (overlays top-left of video player)
+          // Compact, high-contrast watched-before notice at the top-center of the player
           '.reflect-watched-badge {',
-          '  position: absolute; top: 12px; left: 12px; z-index: 60;',
-          '  display: inline-flex; align-items: center; white-space: nowrap;',
-          '  background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);',
-          '  border-radius: 6px; padding: 6px 12px;',
-          '  font-size: 13px; color: #fff;',
+          '  position: absolute; top: 18px; left: 50%; z-index: 60;',
+          '  transform: translateX(-50%); display: inline-flex; align-items: center; gap: 7px;',
+          '  white-space: nowrap; background: rgba(18,18,18,0.92);',
+          '  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);',
+          '  border: 1px solid rgba(251,191,36,0.9); border-radius: 999px; padding: 9px 15px;',
+          '  box-shadow: 0 4px 18px rgba(0,0,0,0.5), 0 0 14px rgba(251,191,36,0.22);',
+          '  font-size: 14px; color: #fff;',
           '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
-          '  font-weight: 500; line-height: 1; pointer-events: none;',
-          '  opacity: 1; transition: opacity 0.5s ease;',
+          '  font-weight: 650; line-height: 1; pointer-events: none;',
+          '  opacity: 1; animation: reflect-badge-in 0.3s ease-out;',
+          '  transition: opacity 0.4s ease, transform 0.4s ease;',
           '}',
-          '.reflect-watched-badge.reflect-badge-hidden { opacity: 0; }',
+          '@keyframes reflect-badge-in {',
+          '  from { opacity: 0; transform: translateX(-50%) translateY(-8px) scale(0.96); }',
+          '  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }',
+          '}',
+          '.reflect-watched-badge.reflect-badge-hidden {',
+          '  opacity: 0; transform: translateX(-50%) translateY(-6px);',
+          '}',
+          '.reflect-watched-badge .reflect-badge-icon {',
+          '  display: inline-grid; place-items: center; width: 18px; height: 18px;',
+          '  border-radius: 50%; background: #fbbf24; color: #181818;',
+          '  font-size: 12px; font-weight: 800;',
+          '}',
           '.reflect-watched-badge .reflect-badge-count {',
-          '  color: #fbbf24; font-weight: 600;',
+          '  color: #fbbf24; font-weight: 650;',
           '}'
         ].join('\n');
         (document.head || document.documentElement).appendChild(s);
       })();
 
       function initYouTubeTracking() {
+        ytTrackingGeneration += 1;
+        var trackingGeneration = ytTrackingGeneration;
+
+        if (ytPollInterval) {
+          clearInterval(ytPollInterval);
+          ytPollInterval = null;
+        }
         if (location.pathname !== '/watch') return;
+
+        var videoUrl = currentYouTubeVideoUrl();
+        if (!videoUrl) return;
 
         // Generate a fresh visit ID for this video
         ytVisitId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         var ytAnnotationShown = false;
-
-        if (ytPollInterval) clearInterval(ytPollInterval);
+        var watchedStatusResolved = false;
 
         // Clean up previous annotation markers and reset state
         hideAnnotationOverlay();
@@ -1348,16 +1378,50 @@
         // Fetch and render annotation markers for this video (delayed to let video load)
         setTimeout(fetchAndRenderMarkers, 3000);
 
-        // Show "watched before" badge if we have a prior visit
-        setTimeout(showWatchedBadge, 2000);
+        // Check local watch memory first; the background also falls back to server annotations.
+        safeSend({
+          action: 'check-video-watched',
+          videoUrl: videoUrl
+        }, function (response) {
+          if (trackingGeneration !== ytTrackingGeneration || currentYouTubeVideoUrl() !== videoUrl) return;
+          if (chrome.runtime.lastError) {
+            watchedStatusResolved = true;
+            return;
+          }
+          watchedStatusResolved = true;
+          if (!response || !response.watched) return;
+
+          ytAnnotationShown = true;
+          if (ytPollInterval) {
+            clearInterval(ytPollInterval);
+            ytPollInterval = null;
+          }
+          showWatchedBadge(response);
+        });
+
+        // A slow or unreachable optional backend must not disable first-watch prompts.
+        setTimeout(function () {
+          if (trackingGeneration === ytTrackingGeneration) watchedStatusResolved = true;
+        }, 5000);
 
         ytPollInterval = setInterval(function () {
-          if (ytAnnotationShown) { clearInterval(ytPollInterval); return; }
+          if (trackingGeneration !== ytTrackingGeneration || ytAnnotationShown) {
+            clearInterval(ytPollInterval);
+            ytPollInterval = null;
+            return;
+          }
+          // Never prompt while the local/server watched check is still in flight.
+          if (!watchedStatusResolved) return;
+
           var video = document.querySelector('video');
           if (!video || !video.duration || video.duration < 30) return;
           if (video.currentTime / video.duration >= 0.95) {
             ytAnnotationShown = true;
             clearInterval(ytPollInterval);
+            ytPollInterval = null;
+
+            // Reaching the reflection point counts as watched even if the prompt is dismissed.
+            safeSend({ action: 'mark-video-watched', videoUrl: videoUrl });
             showYtPrompt(ytVisitId, video);
           }
         }, 2000);
@@ -1366,59 +1430,50 @@
       // -- "Watched before" badge --
       var reflectWatchedBadge = null;
 
-      function showWatchedBadge() {
+      function showWatchedBadge(response) {
         if (location.pathname !== '/watch') return;
 
-        var urlObj = new URL(location.href);
-        var videoUrl = urlObj.origin + urlObj.pathname + '?v=' + urlObj.searchParams.get('v');
+        var annotationCount = response.annotation_count || 0;
 
-        try {
-          if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
-          chrome.runtime.sendMessage({
-            action: 'check-video-watched',
-            videoUrl: videoUrl
-          }, function(response) {
-            if (chrome.runtime.lastError) return;
-            if (!response || !response.watched) return;
+        // Remove previous badge right before inserting new one
+        if (reflectWatchedBadge && reflectWatchedBadge.parentNode) {
+          reflectWatchedBadge.remove();
+          reflectWatchedBadge = null;
+        }
 
-            var annotationCount = response.annotation_count || 0;
+        // Place badge inside the video player container
+        var playerEl = document.querySelector('#movie_player') ||
+                       document.querySelector('.html5-video-player');
+        if (!playerEl) return;
 
-            // Remove previous badge right before inserting new one
-            if (reflectWatchedBadge && reflectWatchedBadge.parentNode) {
-              reflectWatchedBadge.remove();
-              reflectWatchedBadge = null;
-            }
+        reflectWatchedBadge = document.createElement('div');
+        reflectWatchedBadge.className = 'reflect-watched-badge';
 
-            // Place badge inside the video player container
-            var playerEl = document.querySelector('#movie_player') ||
-                           document.querySelector('.html5-video-player');
-            if (!playerEl) return;
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'reflect-badge-icon';
+        iconSpan.textContent = '\u2713';
+        reflectWatchedBadge.appendChild(iconSpan);
+        reflectWatchedBadge.appendChild(document.createTextNode('Watched before'));
 
-            reflectWatchedBadge = document.createElement('div');
-            reflectWatchedBadge.className = 'reflect-watched-badge';
+        if (annotationCount > 0) {
+          reflectWatchedBadge.appendChild(document.createTextNode('\u00a0'));
+          var countSpan = document.createElement('span');
+          countSpan.className = 'reflect-badge-count';
+          countSpan.textContent = '(' + annotationCount + ' annotation' + (annotationCount !== 1 ? 's' : '') + ')';
+          reflectWatchedBadge.appendChild(countSpan);
+        }
 
-            var label = document.createTextNode('Watched before\u00a0');
-            reflectWatchedBadge.appendChild(label);
+        playerEl.appendChild(reflectWatchedBadge);
+        var badgeEl = reflectWatchedBadge;
 
-            var countSpan = document.createElement('span');
-            countSpan.className = 'reflect-badge-count';
-            countSpan.textContent = '(' + annotationCount + ' annotation' + (annotationCount !== 1 ? 's' : '') + ')';
-            reflectWatchedBadge.appendChild(countSpan);
-
-            playerEl.appendChild(reflectWatchedBadge);
-
-            // Auto-hide after 3 seconds
-            setTimeout(function() {
-              if (reflectWatchedBadge) reflectWatchedBadge.classList.add('reflect-badge-hidden');
-            }, 3000);
-            setTimeout(function() {
-              if (reflectWatchedBadge && reflectWatchedBadge.parentNode) {
-                reflectWatchedBadge.remove();
-                reflectWatchedBadge = null;
-              }
-            }, 3500);
-          });
-        } catch (e) { /* extension context invalidated */ }
+        // Stay noticeable for three seconds, then leave quickly and unobtrusively.
+        setTimeout(function() {
+          if (badgeEl.parentNode) badgeEl.classList.add('reflect-badge-hidden');
+        }, 3000);
+        setTimeout(function() {
+          if (badgeEl.parentNode) badgeEl.remove();
+          if (reflectWatchedBadge === badgeEl) reflectWatchedBadge = null;
+        }, 3450);
       }
 
       // -- Annotation markers on YouTube timeline --

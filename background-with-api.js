@@ -2,6 +2,45 @@
 // Sync is optional and configured from the extension settings page.
 
 var HIGHLIGHT_KEY = 'xr_highlights';
+var YOUTUBE_WATCHED_KEY_PREFIX = 'xr_youtube_watched:';
+
+function youtubeVideoId(videoUrl) {
+  try {
+    return new URL(videoUrl).searchParams.get('v');
+  } catch (error) {
+    return null;
+  }
+}
+
+function youtubeWatchedStorageKey(videoUrl) {
+  var videoId = youtubeVideoId(videoUrl);
+  return videoId ? YOUTUBE_WATCHED_KEY_PREFIX + videoId : null;
+}
+
+async function getLocallyWatchedVideo(videoUrl) {
+  var key = youtubeWatchedStorageKey(videoUrl);
+  if (!key) return null;
+
+  return await new Promise(resolve => {
+    chrome.storage.local.get([key], result => resolve(result[key] || null));
+  });
+}
+
+async function rememberWatchedVideo(videoUrl, source) {
+  var key = youtubeWatchedStorageKey(videoUrl);
+  if (!key) return false;
+
+  await new Promise(resolve => {
+    chrome.storage.local.set({
+      [key]: {
+        videoId: youtubeVideoId(videoUrl),
+        watchedAt: new Date().toISOString(),
+        source: source || 'local-playback'
+      }
+    }, resolve);
+  });
+  return true;
+}
 
 const API_CONFIG = {
   baseUrl: '',
@@ -283,8 +322,26 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
 
   if (msg.action === 'check-video-watched') {
     (async function () {
+      var localRecord = await getLocallyWatchedVideo(msg.videoUrl);
+      if (localRecord) {
+        reply({ watched: true, locally_watched: true, annotation_count: 0 });
+        return;
+      }
+
+      // Existing server annotations are also evidence that this video was watched.
       var result = await apiGet('/api/video-watched?video_url=' + encodeURIComponent(msg.videoUrl));
-      reply(result || { watched: false });
+      if (result && result.watched) {
+        await rememberWatchedVideo(msg.videoUrl, 'server-annotation');
+      }
+      reply(result || { watched: false, locally_watched: false, annotation_count: 0 });
+    })();
+    return true;
+  }
+
+  if (msg.action === 'mark-video-watched') {
+    (async function () {
+      var saved = await rememberWatchedVideo(msg.videoUrl, 'local-playback');
+      reply({ ok: saved });
     })();
     return true;
   }

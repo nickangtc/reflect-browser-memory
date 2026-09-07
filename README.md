@@ -45,6 +45,7 @@ The Today view loads images from Unsplash domains. With an access key configured
 - Read Later pages, when backend sync is configured
 - YouTube timestamp annotations and progress-bar markers
 - Optional YouTube watch reflections
+- Local watched-video memory that avoids repeat reflection prompts
 
 Reflect does **not** capture general page history, browsing trails, referrers, social interactions, or network requests. See [`PRIVACY.md`](PRIVACY.md).
 

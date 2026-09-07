@@ -16,6 +16,7 @@ This document reflects the public scope of Reflect after removing privacy-sensit
 - YouTube annotation markers on the progress bar
 - YouTube annotation editing/deletion
 - YouTube watch reflections
+- Local watched-video memory that suppresses repeat reflection prompts
 - Narrow YouTube metadata needed to label annotation cards
 - New tab dashboard with Library, Read, Activity, and Analytics tabs
 - Masonry library, type filters, infinite scroll, activity sparkline, and Read Later preview
