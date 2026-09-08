@@ -100,26 +100,15 @@ async function apiGet(endpoint) {
   }
 }
 
-async function apiPut(endpoint, data) {
-  await ensureConfig();
-  if (!API_CONFIG.enabled) return null;
-  if (!API_CONFIG.apiKey || !API_CONFIG.baseUrl) return null;
-
+async function apiErrorMessage(response) {
+  let detail = '';
   try {
-    const response = await fetch(`${API_CONFIG.baseUrl}${endpoint}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': API_CONFIG.apiKey
-      },
-      body: JSON.stringify(data)
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
+    const body = await response.json();
+    detail = body.details || body.error || '';
   } catch (error) {
-    console.error('API PUT failed:', endpoint, error.message);
-    return null;
+    // The status text below is still useful when the response has no JSON body.
   }
+  return detail || `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
 }
 
 async function apiRequest(endpoint, data, retries = 3) {
@@ -356,10 +345,32 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
 
   if (msg.action === 'update-youtube-annotation') {
     (async function () {
-      var result = await apiPut('/api/youtube-annotation/' + encodeURIComponent(msg.annotationId), {
-        annotation: msg.annotation
-      });
-      reply({ ok: !!result });
+      await ensureConfig();
+      if (!API_CONFIG.enabled) {
+        reply({ ok: false, error: 'Backend sync is disabled' });
+        return;
+      }
+      if (!API_CONFIG.apiKey || !API_CONFIG.baseUrl) {
+        reply({ ok: false, error: 'Backend URL or API key is missing' });
+        return;
+      }
+      try {
+        var resp = await fetch(`${API_CONFIG.baseUrl}/api/youtube-annotation/${encodeURIComponent(msg.annotationId)}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': API_CONFIG.apiKey
+          },
+          body: JSON.stringify({ annotation: msg.annotation })
+        });
+        if (!resp.ok) {
+          reply({ ok: false, error: await apiErrorMessage(resp) });
+          return;
+        }
+        reply({ ok: true, annotation: await resp.json() });
+      } catch (err) {
+        reply({ ok: false, error: err.message });
+      }
     })();
     return true;
   }
@@ -367,12 +378,24 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
   if (msg.action === 'delete-youtube-annotation') {
     (async function () {
       await ensureConfig();
+      if (!API_CONFIG.enabled) {
+        reply({ ok: false, error: 'Backend sync is disabled' });
+        return;
+      }
+      if (!API_CONFIG.apiKey || !API_CONFIG.baseUrl) {
+        reply({ ok: false, error: 'Backend URL or API key is missing' });
+        return;
+      }
       try {
         var resp = await fetch(`${API_CONFIG.baseUrl}/api/timeline/youtube_annotations/${encodeURIComponent(msg.annotationId)}`, {
           method: 'DELETE',
           headers: { 'X-API-Key': API_CONFIG.apiKey }
         });
-        reply({ ok: resp.ok });
+        if (!resp.ok) {
+          reply({ ok: false, error: await apiErrorMessage(resp) });
+          return;
+        }
+        reply({ ok: true });
       } catch (err) {
         reply({ ok: false, error: err.message });
       }

@@ -180,6 +180,9 @@
   // -- Toast notifications --
   var toastEl = null;
   var toastTimer = null;
+  var undoToastEl = null;
+  var undoToastTimer = null;
+  var undoToastCleanup = null;
 
   (function injectToastStyles() {
     var s = document.createElement('style');
@@ -193,6 +196,15 @@
       '  animation: hltr-toast-in 0.2s ease-out;',
       '  pointer-events: none;',
       '}',
+      '.hltr-toast--action {',
+      '  display: flex; align-items: center; gap: 12px; pointer-events: auto;',
+      '  background: #1a1a2e; color: #fff;',
+      '}',
+      '.hltr-toast-action-btn {',
+      '  border: 0; border-radius: 5px; padding: 4px 9px; cursor: pointer;',
+      '  background: #fbbf24; color: #1a1a2e; font: inherit; font-weight: 700;',
+      '}',
+      '.hltr-toast-action-btn:hover { background: #f59e0b; }',
       '@keyframes hltr-toast-in {',
       '  from { transform: translateX(-50%) translateY(10px); opacity: 0; }',
       '  to { transform: translateX(-50%) translateY(0); opacity: 1; }',
@@ -204,17 +216,68 @@
     (document.head || document.documentElement).appendChild(s);
   })();
 
-  function showToast(message, type, duration) {
+  function clearToast() {
     if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = null;
     if (toastEl && toastEl.parentNode) toastEl.remove();
+    toastEl = null;
+  }
+
+  function showToast(message, type, duration) {
+    clearToast();
     toastEl = document.createElement('div');
     toastEl.className = 'hltr-toast hltr-toast--' + (type || 'success');
     toastEl.textContent = message;
     document.body.appendChild(toastEl);
-    toastTimer = setTimeout(function () {
-      if (toastEl && toastEl.parentNode) toastEl.remove();
-      toastEl = null;
-    }, duration || 2000);
+    toastTimer = setTimeout(clearToast, duration || 2000);
+  }
+
+  function showUndoToast(renderMessage, onUndo, onExpire) {
+    // Keep undo independent from ordinary success/error toasts so its window cannot be cut short.
+    if (undoToastCleanup) undoToastCleanup();
+
+    undoToastEl = document.createElement('div');
+    undoToastEl.className = 'hltr-toast hltr-toast--action';
+
+    var messageEl = document.createElement('span');
+    var undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'hltr-toast-action-btn';
+    undoBtn.textContent = 'Undo';
+    undoToastEl.appendChild(messageEl);
+    undoToastEl.appendChild(undoBtn);
+    document.body.appendChild(undoToastEl);
+
+    var secondsLeft = 3;
+    function updateMessage() { messageEl.textContent = renderMessage(secondsLeft); }
+    updateMessage();
+
+    var countdown = setInterval(function () {
+      secondsLeft -= 1;
+      if (secondsLeft > 0) updateMessage();
+    }, 1000);
+
+    var finished = false;
+    function finish(undo) {
+      if (finished) return;
+      finished = true;
+      clearInterval(countdown);
+      if (undoToastTimer) clearTimeout(undoToastTimer);
+      undoToastTimer = null;
+      if (undoToastEl && undoToastEl.parentNode) undoToastEl.remove();
+      undoToastEl = null;
+      undoToastCleanup = null;
+      if (undo) onUndo();
+      else onExpire();
+    }
+    undoToastCleanup = function () { finish(false); };
+
+    undoBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      finish(true);
+    });
+    undoToastTimer = setTimeout(function () { finish(false); }, 3000);
   }
 
   (function injectNoteStyles() {
@@ -1241,31 +1304,15 @@
           '  transform: translate(-50%, -50%) scale(1.5);',
           '  box-shadow: 0 0 6px rgba(251,191,36,0.6);',
           '}',
-          // Tooltip on hover
-          '.reflect-marker-tooltip {',
-          '  position: fixed; pointer-events: none; z-index: 99999;',
-          '  background: #1a1a2e; color: #fff; padding: 8px 12px; border-radius: 8px;',
-          '  font-size: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
-          '  white-space: normal; max-width: 400px; word-wrap: break-word;',
-          '  box-shadow: 0 2px 12px rgba(0,0,0,0.4);',
-          '  opacity: 0; transition: opacity 0.15s ease;',
-          '  display: none;',
-          '}',
-          '.reflect-marker-tooltip.reflect-tooltip-visible { opacity: 1; display: block; }',
-          '.reflect-marker-connector {',
-          '  position: fixed; width: 1px; background: rgba(251,191,36,0.5);',
-          '  pointer-events: none; z-index: 99998;',
-          '  opacity: 0; transition: opacity 0.15s ease;',
-          '  display: none;',
-          '}',
-          '.reflect-marker-connector.reflect-connector-visible { opacity: 1; display: block; }',
-          // Floating overlay during playback
+          // One shared popover for marker hover, editing, and natural playback
           '.reflect-annotation-overlay {',
-          '  position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);',
-          '  background: rgba(26, 26, 46, 0.92); color: #fff; border-radius: 10px;',
+          '  position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%);',
+          '  width: max-content; max-width: calc(100% - 24px); min-width: min(200px, calc(100% - 24px));',
+          '  max-height: calc(100% - 24px); box-sizing: border-box; overflow-y: auto;',
+          '  background: rgba(26, 26, 46, 0.80); color: #fff; border-radius: 10px;',
           '  padding: 10px 14px; z-index: 50;',
           '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;',
-          '  font-size: 13px; max-width: 560px; min-width: 200px;',
+          '  font-size: 13px;',
           '  box-shadow: 0 4px 16px rgba(0,0,0,0.35);',
           '  display: flex; align-items: center; gap: 8px;',
           '  animation: reflect-fade-in 0.25s ease-out;',
@@ -1282,39 +1329,28 @@
           '  flex: 1; min-width: 0; line-height: 1.4;',
           '  max-height: 14em; overflow-y: auto; overflow-wrap: anywhere;',
           '}',
-          '.reflect-annotation-overlay .reflect-edit-btn,',
-          '.reflect-annotation-overlay .reflect-delete-btn,',
-          '.reflect-annotation-overlay .reflect-close-btn {',
-          '  background: none; border: none; color: rgba(255,255,255,0.45);',
-          '  cursor: pointer; padding: 2px 4px; font-size: 14px; line-height: 1;',
+          '.reflect-annotation-overlay .reflect-delete-btn {',
+          '  background: none; border: none; color: rgba(255,255,255,0.55);',
+          '  cursor: pointer; padding: 4px; font-size: 16px; line-height: 1;',
           '  flex-shrink: 0;',
           '}',
-          '.reflect-annotation-overlay .reflect-edit-btn:hover,',
-          '.reflect-annotation-overlay .reflect-delete-btn:hover,',
-          '.reflect-annotation-overlay .reflect-close-btn:hover {',
-          '  color: rgba(255,255,255,0.85);',
+          '.reflect-annotation-overlay .reflect-delete-btn:hover {',
+          '  color: #fecaca;',
+          '}',
+          '.reflect-annotation-overlay .reflect-delete-btn:disabled {',
+          '  opacity: 0.35; cursor: default;',
           '}',
           // Edit mode
           '.reflect-annotation-overlay .reflect-edit-input {',
-          '  flex: 1; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);',
+          '  flex: 1 1 360px; width: min(360px, calc(100vw - 150px)); max-width: 100%;',
+          '  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);',
           '  border-radius: 5px; padding: 4px 8px; color: #fff; font-size: 13px;',
-          '  font-family: inherit; line-height: 1.4; outline: none; min-width: 180px;',
-          '  box-sizing: border-box; resize: none; overflow-y: hidden;',
+          '  font-family: inherit; line-height: 1.4; outline: none; min-width: 80px;',
+          '  box-sizing: border-box; resize: none; overflow-y: auto; max-height: 10em;',
           '}',
           '.reflect-annotation-overlay .reflect-edit-input:focus {',
           '  border-color: #fbbf24;',
           '}',
-          '.reflect-annotation-overlay .reflect-save-btn {',
-          '  background: #fbbf24; color: #1a1a2e; border: none; border-radius: 5px;',
-          '  padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer;',
-          '  flex-shrink: 0;',
-          '}',
-          '.reflect-annotation-overlay .reflect-save-btn:hover { background: #f59e0b; }',
-          '.reflect-annotation-overlay .reflect-cancel-btn {',
-          '  background: none; border: none; color: rgba(255,255,255,0.5);',
-          '  cursor: pointer; font-size: 12px; padding: 3px 6px; flex-shrink: 0;',
-          '}',
-          '.reflect-annotation-overlay .reflect-cancel-btn:hover { color: #fff; }',
           // Compact, high-contrast watched-before notice at the top-center of the player
           '.reflect-watched-badge {',
           '  position: absolute; top: 18px; left: 50%; z-index: 60;',
@@ -1351,6 +1387,8 @@
       function initYouTubeTracking() {
         ytTrackingGeneration += 1;
         var trackingGeneration = ytTrackingGeneration;
+        // A pending delete belongs to the video being left; commit it before resetting marker state.
+        if (undoToastCleanup) undoToastCleanup();
 
         if (ytPollInterval) {
           clearInterval(ytPollInterval);
@@ -1375,8 +1413,10 @@
           reflectMarkerContainer = null;
         }
 
-        // Fetch and render annotation markers for this video (delayed to let video load)
-        setTimeout(fetchAndRenderMarkers, 3000);
+        // Fetch and render annotation markers for this video (delayed to let video load).
+        setTimeout(function () {
+          fetchAndRenderMarkers(trackingGeneration, videoUrl);
+        }, 3000);
 
         // Check local watch memory first; the background also falls back to server annotations.
         safeSend({
@@ -1481,31 +1521,50 @@
       var reflectOverlayEl = null;
       var reflectDrawOverlayEl = null;
       var reflectOverlayTimer = null;
+      var reflectOverlayMode = null;
+      var reflectOverlayGeneration = 0;
+      var reflectOverlayResizeObserver = null;
       var reflectAnnotations = [];
+      var reflectSavingAnnotationIds = new Set();
+      var reflectDeletingAnnotationIds = new Set();
+      var reflectMarkerMutationVersion = 0;
       var reflectLastShownId = null;
       var reflectResizeObserver = null;
 
-      function fetchAndRenderMarkers() {
-        if (location.pathname !== '/watch') return;
+      function fetchAndRenderMarkers(expectedGeneration, expectedVideoUrl) {
+        if (location.pathname !== '/watch' ||
+            expectedGeneration !== ytTrackingGeneration ||
+            expectedVideoUrl !== currentYouTubeVideoUrl()) return;
 
         var video = document.querySelector('video');
-        if (!video) { setTimeout(fetchAndRenderMarkers, 2000); return; }
+        if (!video) {
+          setTimeout(function () {
+            fetchAndRenderMarkers(expectedGeneration, expectedVideoUrl);
+          }, 2000);
+          return;
+        }
 
+        var readyStarted = false;
         function onReady() {
-          if (!video.duration || video.duration < 1) return;
-
-          var urlObj = new URL(location.href);
-          var videoUrl = urlObj.origin + urlObj.pathname + '?v=' + urlObj.searchParams.get('v');
+          if (readyStarted || !video.duration || video.duration < 1) return;
+          if (expectedGeneration !== ytTrackingGeneration || expectedVideoUrl !== currentYouTubeVideoUrl()) return;
+          readyStarted = true;
+          var requestMutationVersion = reflectMarkerMutationVersion;
 
           try {
             if (chrome && chrome.runtime && chrome.runtime.id) {
               chrome.runtime.sendMessage({
                 action: 'get-youtube-annotations',
-                videoUrl: videoUrl
+                videoUrl: expectedVideoUrl
               }, function (response) {
-                if (chrome.runtime.lastError) return;
+                if (chrome.runtime.lastError ||
+                    expectedGeneration !== ytTrackingGeneration ||
+                    expectedVideoUrl !== currentYouTubeVideoUrl() ||
+                    requestMutationVersion !== reflectMarkerMutationVersion) return;
                 if (!response || !response.annotations) return;
-                reflectAnnotations = response.annotations;
+                reflectAnnotations = response.annotations.filter(function (ann) {
+                  return !reflectDeletingAnnotationIds.has(ann.id);
+                });
                 if (reflectAnnotations.length > 0) {
                   renderMarkerDots(video);
                   startPlaybackListener(video);
@@ -1520,56 +1579,6 @@
         } else {
           video.addEventListener('loadedmetadata', onReady, { once: true });
           setTimeout(onReady, 3000);
-        }
-      }
-
-      // Shared tooltip + connector line (appended to body, positioned via JS)
-      var reflectTooltipEl = null;
-      var reflectConnectorEl = null;
-
-      function showMarkerTooltip(ann, dotEl) {
-        if (!reflectTooltipEl) {
-          reflectTooltipEl = document.createElement('div');
-          reflectTooltipEl.className = 'reflect-marker-tooltip';
-          document.body.appendChild(reflectTooltipEl);
-        }
-        if (!reflectConnectorEl) {
-          reflectConnectorEl = document.createElement('div');
-          reflectConnectorEl.className = 'reflect-marker-connector';
-          document.body.appendChild(reflectConnectorEl);
-        }
-        reflectTooltipEl.textContent = formatTimestamp(ann.timestamp_seconds) + ' \u2014 ' + ann.annotation;
-
-        var player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-        if (!player) return;
-        var playerRect = player.getBoundingClientRect();
-        var dotRect = dotEl.getBoundingClientRect();
-
-        var tooltipTop = playerRect.top + 20;
-        var dotCenterX = dotRect.left + dotRect.width / 2;
-
-        reflectTooltipEl.style.left = dotRect.left + 'px';
-        reflectTooltipEl.style.top = tooltipTop + 'px';
-        reflectTooltipEl.classList.add('reflect-tooltip-visible');
-
-        // Measure tooltip height after making it visible
-        var tooltipBottom = tooltipTop + reflectTooltipEl.offsetHeight;
-        var lineTop = tooltipBottom + 2;
-        var lineBottom = dotRect.top + dotRect.height / 2;
-        var lineHeight = Math.max(0, lineBottom - lineTop);
-
-        reflectConnectorEl.style.left = (dotCenterX - 0.5) + 'px';
-        reflectConnectorEl.style.top = lineTop + 'px';
-        reflectConnectorEl.style.height = lineHeight + 'px';
-        reflectConnectorEl.classList.add('reflect-connector-visible');
-      }
-
-      function hideMarkerTooltip() {
-        if (reflectTooltipEl) {
-          reflectTooltipEl.classList.remove('reflect-tooltip-visible');
-        }
-        if (reflectConnectorEl) {
-          reflectConnectorEl.classList.remove('reflect-connector-visible');
         }
       }
 
@@ -1597,17 +1606,31 @@
           dot.dataset.annotationId = ann.id;
 
           dot.addEventListener('mouseenter', function () {
-            showMarkerTooltip(ann, dot);
+            if (reflectOverlayMode !== 'editing') showAnnotationOverlay(ann, video, 'hover');
           });
           dot.addEventListener('mouseleave', function () {
-            hideMarkerTooltip();
+            if (reflectOverlayMode === 'hover' && reflectLastShownId === ann.id) {
+              hideAnnotationOverlay();
+            }
           });
 
-          dot.addEventListener('click', function (e) {
+          function blockYouTubeScrub(e) {
+            e.preventDefault();
             e.stopPropagation();
-            hideMarkerTooltip();
-            video.currentTime = ann.timestamp_seconds;
-            showAnnotationOverlay(ann, video);
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          }
+          dot.addEventListener('pointerdown', blockYouTubeScrub);
+          dot.addEventListener('pointerup', blockYouTubeScrub);
+          dot.addEventListener('mousedown', blockYouTubeScrub);
+          dot.addEventListener('mouseup', blockYouTubeScrub);
+          dot.addEventListener('click', function (e) {
+            blockYouTubeScrub(e);
+            if (reflectSavingAnnotationIds.has(ann.id)) {
+              showToast('Annotation update in progress', 'offline', 1500);
+              return;
+            }
+            showAnnotationOverlay(ann, video, 'editing');
+            enterEditMode(ann, video);
           });
 
           reflectMarkerContainer.appendChild(dot);
@@ -1625,9 +1648,24 @@
         reflectResizeObserver.observe(progressBar);
       }
 
-      function showAnnotationOverlay(ann, video) {
+      function positionAnnotationOverlay(player) {
+        if (!reflectOverlayEl || !player) return;
+        var playerRect = player.getBoundingClientRect();
+        var progressBar = player.querySelector('.ytp-progress-bar') || document.querySelector('.ytp-progress-bar');
+        var bottom = 48;
+        if (progressBar) {
+          var progressRect = progressBar.getBoundingClientRect();
+          var measuredBottom = playerRect.bottom - progressRect.top + 8;
+          if (measuredBottom >= 12 && measuredBottom <= playerRect.height - 12) bottom = measuredBottom;
+        }
+        var maxBottom = Math.max(12, playerRect.height - reflectOverlayEl.offsetHeight - 8);
+        reflectOverlayEl.style.bottom = Math.min(bottom, maxBottom) + 'px';
+      }
+
+      function showAnnotationOverlay(ann, video, mode) {
         hideAnnotationOverlay();
         reflectLastShownId = ann.id;
+        reflectOverlayMode = mode || 'playback';
 
         var player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
         if (!player) return;
@@ -1643,41 +1681,19 @@
         text.className = 'reflect-text';
         text.textContent = ann.annotation;
 
-        var editBtn = document.createElement('button');
-        editBtn.className = 'reflect-edit-btn';
-        editBtn.title = 'Edit';
-        editBtn.textContent = '\u270E';
-
-        var deleteBtn = document.createElement('button');
-        deleteBtn.className = 'reflect-delete-btn';
-        deleteBtn.title = 'Delete';
-        deleteBtn.textContent = '\u2715';
-
-        var closeBtn = document.createElement('button');
-        closeBtn.className = 'reflect-close-btn';
-        closeBtn.title = 'Close';
-        closeBtn.textContent = '\u00D7';
-
-        editBtn.addEventListener('click', function () {
-          enterEditMode(ann, video);
-        });
-
-        deleteBtn.addEventListener('click', function () {
-          deleteAnnotation(ann, video);
-        });
-
-        closeBtn.addEventListener('click', function () {
-          hideAnnotationOverlay();
-        });
-
         reflectOverlayEl.appendChild(ts);
         reflectOverlayEl.appendChild(text);
-        reflectOverlayEl.appendChild(editBtn);
-        reflectOverlayEl.appendChild(deleteBtn);
-        reflectOverlayEl.appendChild(closeBtn);
 
         player.style.position = 'relative';
         player.appendChild(reflectOverlayEl);
+        positionAnnotationOverlay(player);
+        if (typeof ResizeObserver !== 'undefined') {
+          reflectOverlayResizeObserver = new ResizeObserver(function () {
+            positionAnnotationOverlay(player);
+          });
+          reflectOverlayResizeObserver.observe(player);
+          reflectOverlayResizeObserver.observe(reflectOverlayEl);
+        }
 
         // Render drawing data if present
         if (ann.draw_data && ann.draw_data.length > 0) {
@@ -1718,26 +1734,40 @@
         }
 
         if (reflectOverlayTimer) clearTimeout(reflectOverlayTimer);
-        reflectOverlayTimer = setTimeout(hideAnnotationOverlay, 6000);
+        if (reflectOverlayMode === 'playback') {
+          reflectOverlayTimer = setTimeout(hideAnnotationOverlay, 6000);
+        }
       }
 
       function hideAnnotationOverlay() {
+        reflectOverlayGeneration += 1;
         if (reflectOverlayTimer) { clearTimeout(reflectOverlayTimer); reflectOverlayTimer = null; }
+        if (reflectOverlayResizeObserver) {
+          reflectOverlayResizeObserver.disconnect();
+          reflectOverlayResizeObserver = null;
+        }
         if (reflectOverlayEl && reflectOverlayEl.parentNode) {
           reflectOverlayEl.remove();
         }
         reflectOverlayEl = null;
+        reflectOverlayMode = null;
         if (reflectDrawOverlayEl && reflectDrawOverlayEl.parentNode) {
           reflectDrawOverlayEl.remove();
         }
         reflectDrawOverlayEl = null;
       }
 
+      function annotationErrorMessage(prefix, error) {
+        var detail = error && (error.message || error.error || error.details);
+        return prefix + (detail ? ': ' + detail : '');
+      }
+
       function enterEditMode(ann, video) {
         if (!reflectOverlayEl) return;
         if (reflectOverlayTimer) { clearTimeout(reflectOverlayTimer); reflectOverlayTimer = null; }
+        reflectOverlayMode = 'editing';
 
-        // Clear overlay content safely
+        // Match article annotation editing: edit inline and select all text immediately.
         while (reflectOverlayEl.firstChild) {
           reflectOverlayEl.removeChild(reflectOverlayEl.firstChild);
         }
@@ -1750,93 +1780,204 @@
         input.rows = 1;
         input.className = 'reflect-edit-input';
         input.value = ann.annotation;
-        input.addEventListener('input', function () { autoSizeAnnotationTextarea(input); });
+        input.addEventListener('input', function () {
+          autoSizeAnnotationTextarea(input);
+          positionAnnotationOverlay(reflectOverlayEl && reflectOverlayEl.parentNode);
+        });
 
-        var saveBtn = document.createElement('button');
-        saveBtn.className = 'reflect-save-btn';
-        saveBtn.textContent = 'Save';
+        var deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'reflect-delete-btn';
+        deleteBtn.title = 'Delete annotation';
+        deleteBtn.setAttribute('aria-label', 'Delete annotation');
+        deleteBtn.textContent = '\u2715';
 
-        var cancelBtn = document.createElement('button');
-        cancelBtn.className = 'reflect-cancel-btn';
-        cancelBtn.textContent = 'Cancel';
-
+        var saving = false;
+        var editGeneration = reflectOverlayGeneration;
+        function editorIsCurrent() {
+          return editGeneration === reflectOverlayGeneration && reflectOverlayMode === 'editing' && input.isConnected;
+        }
         function save() {
+          if (saving) return;
           var newText = input.value.trim();
-          if (!newText || newText === ann.annotation) {
-            showAnnotationOverlay(ann, video);
+          if (!newText) {
+            showToast('Failed to update: annotation cannot be empty', 'error', 3000);
             return;
           }
+          if (newText === ann.annotation) {
+            showAnnotationOverlay(ann, video, 'playback');
+            return;
+          }
+          saving = true;
+          var saveVideoUrl = currentYouTubeVideoUrl();
+          reflectSavingAnnotationIds.add(ann.id);
+          reflectMarkerMutationVersion += 1;
+          input.disabled = true;
+          deleteBtn.disabled = true;
           try {
-            if (chrome && chrome.runtime && chrome.runtime.id) {
-              chrome.runtime.sendMessage({
-                action: 'update-youtube-annotation',
-                annotationId: ann.id,
-                annotation: newText
-              }, function (resp) {
-                if (chrome.runtime.lastError) return;
-                if (resp && resp.ok) {
-                  ann.annotation = newText;
-                  showAnnotationOverlay(ann, video);
-                  showToast('Annotation updated', 'success', 1500);
-                } else {
-                  showToast('Failed to update', 'error', 2000);
-                }
-              });
+            if (!(chrome && chrome.runtime && chrome.runtime.id)) {
+              throw new Error('Extension context is unavailable');
             }
-          } catch (e) { showToast('Failed to update', 'error', 2000); }
+            chrome.runtime.sendMessage({
+              action: 'update-youtube-annotation',
+              annotationId: ann.id,
+              annotation: newText
+            }, function (resp) {
+              reflectSavingAnnotationIds.delete(ann.id);
+              if (saveVideoUrl === currentYouTubeVideoUrl()) reflectMarkerMutationVersion += 1;
+              var runtimeError = chrome.runtime.lastError;
+              if (runtimeError) {
+                saving = false;
+                if (editorIsCurrent()) {
+                  input.disabled = false;
+                  deleteBtn.disabled = false;
+                  input.focus();
+                }
+                showToast(annotationErrorMessage('Failed to update', runtimeError), 'error', 3000);
+                return;
+              }
+              if (resp && resp.ok) {
+                ann.annotation = newText;
+                for (var i = 0; i < reflectAnnotations.length; i++) {
+                  if (reflectAnnotations[i].id === ann.id) reflectAnnotations[i].annotation = newText;
+                }
+                if (editorIsCurrent()) {
+                  showAnnotationOverlay(ann, video, 'playback');
+                } else if (reflectLastShownId === ann.id && reflectOverlayEl) {
+                  var visibleText = reflectOverlayEl.querySelector('.reflect-text');
+                  if (visibleText) visibleText.textContent = newText;
+                }
+                showToast('Annotation updated', 'success', 3000);
+              } else {
+                saving = false;
+                if (editorIsCurrent()) {
+                  input.disabled = false;
+                  deleteBtn.disabled = false;
+                  input.focus();
+                }
+                showToast(annotationErrorMessage('Failed to update', resp), 'error', 3000);
+              }
+            });
+          } catch (e) {
+            saving = false;
+            reflectSavingAnnotationIds.delete(ann.id);
+            if (saveVideoUrl === currentYouTubeVideoUrl()) reflectMarkerMutationVersion += 1;
+            if (editorIsCurrent()) {
+              input.disabled = false;
+              deleteBtn.disabled = false;
+              input.focus();
+            }
+            showToast(annotationErrorMessage('Failed to update', e), 'error', 3000);
+          }
         }
 
-        saveBtn.addEventListener('click', save);
-        cancelBtn.addEventListener('click', function () {
-          showAnnotationOverlay(ann, video);
+        deleteBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          deleteAnnotation(ann, video);
         });
         input.addEventListener('keydown', function (e) {
           e.stopPropagation();
-          if (e.key === 'Enter') save();
-          else if (e.key === 'Escape') showAnnotationOverlay(ann, video);
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            save();
+          } else if (e.key === 'Escape' && !saving) {
+            e.preventDefault();
+            showAnnotationOverlay(ann, video, 'playback');
+          }
         });
         input.addEventListener('keyup', function (e) { e.stopPropagation(); });
         input.addEventListener('keypress', function (e) { e.stopPropagation(); });
 
         reflectOverlayEl.appendChild(ts);
         reflectOverlayEl.appendChild(input);
-        reflectOverlayEl.appendChild(saveBtn);
-        reflectOverlayEl.appendChild(cancelBtn);
+        reflectOverlayEl.appendChild(deleteBtn);
+        positionAnnotationOverlay(reflectOverlayEl.parentNode);
 
         setTimeout(function () {
+          if (!editorIsCurrent()) return;
           autoSizeAnnotationTextarea(input);
+          positionAnnotationOverlay(reflectOverlayEl && reflectOverlayEl.parentNode);
           input.focus();
           input.select();
         }, 50);
       }
 
       function deleteAnnotation(ann, video) {
-        try {
-          if (chrome && chrome.runtime && chrome.runtime.id) {
-            chrome.runtime.sendMessage({
-              action: 'delete-youtube-annotation',
-              annotationId: ann.id
-            }, function (resp) {
-              if (chrome.runtime.lastError) return;
-              if (resp && resp.ok) {
-                reflectAnnotations = reflectAnnotations.filter(function (a) { return a.id !== ann.id; });
-                if (reflectMarkerContainer) {
-                  var dot = reflectMarkerContainer.querySelector('[data-annotation-id="' + ann.id + '"]');
-                  if (dot) dot.remove();
-                }
-                hideAnnotationOverlay();
-                showToast('Annotation deleted', 'success', 1500);
-              } else {
-                showToast('Failed to delete', 'error', 2000);
-              }
-            });
+        var originalIndex = reflectAnnotations.indexOf(ann);
+        if (originalIndex < 0 || reflectSavingAnnotationIds.has(ann.id)) return;
+        var deleteVideoUrl = currentYouTubeVideoUrl();
+        reflectDeletingAnnotationIds.add(ann.id);
+        reflectMarkerMutationVersion += 1;
+
+        reflectAnnotations.splice(originalIndex, 1);
+        if (reflectMarkerContainer) {
+          var dot = reflectMarkerContainer.querySelector('[data-annotation-id="' + ann.id + '"]');
+          if (dot) dot.remove();
+        }
+        hideAnnotationOverlay();
+
+        function restoreAnnotation(reopenEditor) {
+          if (deleteVideoUrl !== currentYouTubeVideoUrl()) return;
+          if (reflectAnnotations.indexOf(ann) === -1) {
+            reflectAnnotations.splice(Math.min(originalIndex, reflectAnnotations.length), 0, ann);
           }
-        } catch (e) { showToast('Failed to delete', 'error', 2000); }
+          var currentVideo = document.querySelector('video') || video;
+          renderMarkerDots(currentVideo);
+          if (reopenEditor) {
+            showAnnotationOverlay(ann, currentVideo, 'editing');
+            enterEditMode(ann, currentVideo);
+          }
+        }
+
+        showUndoToast(
+          function (seconds) { return 'Annotation deleted · ' + seconds + 's'; },
+          function () {
+            reflectDeletingAnnotationIds.delete(ann.id);
+            reflectMarkerMutationVersion += 1;
+            restoreAnnotation(true);
+            showToast('Deletion undone', 'success', 3000);
+          },
+          function () {
+            try {
+              if (!(chrome && chrome.runtime && chrome.runtime.id)) {
+                throw new Error('Extension context is unavailable');
+              }
+              chrome.runtime.sendMessage({
+                action: 'delete-youtube-annotation',
+                annotationId: ann.id
+              }, function (resp) {
+                reflectDeletingAnnotationIds.delete(ann.id);
+                if (deleteVideoUrl === currentYouTubeVideoUrl()) reflectMarkerMutationVersion += 1;
+                var runtimeError = chrome.runtime.lastError;
+                if (runtimeError || !resp || !resp.ok) {
+                  restoreAnnotation(false);
+                  showToast(annotationErrorMessage('Failed to delete', runtimeError || resp), 'error', 3000);
+                  return;
+                }
+                reflectAnnotations = reflectAnnotations.filter(function (activeAnn) {
+                  return activeAnn.id !== ann.id;
+                });
+                if (deleteVideoUrl === currentYouTubeVideoUrl()) {
+                  var currentVideo = document.querySelector('video');
+                  if (currentVideo) renderMarkerDots(currentVideo);
+                  if (reflectLastShownId === ann.id) hideAnnotationOverlay();
+                }
+                showToast('Annotation deleted', 'success', 3000);
+              });
+            } catch (e) {
+              reflectDeletingAnnotationIds.delete(ann.id);
+              if (deleteVideoUrl === currentYouTubeVideoUrl()) reflectMarkerMutationVersion += 1;
+              restoreAnnotation(false);
+              showToast(annotationErrorMessage('Failed to delete', e), 'error', 3000);
+            }
+          }
+        );
       }
 
       function startPlaybackListener(video) {
         video.addEventListener('timeupdate', function () {
-          if (!reflectAnnotations.length) return;
+          if (!reflectAnnotations.length || reflectOverlayMode === 'editing' || reflectOverlayMode === 'hover') return;
           var t = video.currentTime;
 
           for (var i = 0; i < reflectAnnotations.length; i++) {
@@ -1844,11 +1985,14 @@
             var diff = t - ann.timestamp_seconds;
             if (diff >= 0 && diff < 2) {
               if (reflectLastShownId !== ann.id) {
-                showAnnotationOverlay(ann, video);
+                showAnnotationOverlay(ann, video, 'playback');
               }
               return;
             }
           }
+
+          // Allow the same annotation to appear again after seeking or replaying.
+          reflectLastShownId = null;
         });
       }
 
