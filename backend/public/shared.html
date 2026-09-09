@@ -46,91 +46,120 @@
       margin-top: 4px;
     }
 
+    .watch-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
     .video-embed {
       position: relative;
       width: 100%;
-      padding-bottom: 56.25%;
+      aspect-ratio: 16 / 9;
       background: #000;
       border-radius: 12px;
       overflow: hidden;
-      margin-bottom: 32px;
     }
 
     .video-embed iframe {
       position: absolute;
-      top: 0;
-      left: 0;
+      inset: 0;
       width: 100%;
       height: 100%;
       border: none;
     }
 
+    .annotations-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
     .annotations-label {
-      font-size: 14px;
-      font-weight: 600;
-      color: #888;
+      flex: 0 0 auto;
+      padding: 14px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #777;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 16px;
+      border-bottom: 1px solid #eee;
     }
 
-    .annotations-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
-    }
-
-    @media (max-width: 900px) {
-      .annotations-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-
-    @media (max-width: 580px) {
-      .annotations-grid { grid-template-columns: 1fr; }
+    .annotations-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
     }
 
     .annotation-card {
+      display: block;
+      width: 100%;
+      padding: 14px 16px;
+      color: inherit;
+      font: inherit;
+      text-align: left;
       background: #fff;
-      border: 1px solid #e8e8e8;
-      border-radius: 10px;
-      padding: 16px;
+      border: 0;
+      border-bottom: 1px solid #f0f0f0;
       cursor: pointer;
-      transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+      transition: background 0.15s, box-shadow 0.15s;
     }
 
-    .annotation-card:hover {
-      border-color: #ccc;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      transform: translateY(-1px);
-    }
+    .annotation-card:last-child { border-bottom: 0; }
+
+    .annotation-card:hover,
+    .annotation-card:focus-visible { background: #fafafa; outline: none; }
+
+    .annotation-card:focus-visible { box-shadow: inset 3px 0 0 #f44336; }
 
     .annotation-card.active {
-      border-color: #f44336;
-      box-shadow: 0 2px 12px rgba(244,67,54,0.12);
+      background: #fff5f4;
+      box-shadow: inset 3px 0 0 #f44336;
     }
 
     .annotation-timestamp {
       display: inline-block;
       font-size: 12px;
       font-weight: 700;
-      color: #f44336;
+      color: #e64536;
       background: #fef2f2;
-      padding: 2px 8px;
+      padding: 2px 7px;
       border-radius: 4px;
-      margin-bottom: 8px;
+      margin-bottom: 7px;
       font-variant-numeric: tabular-nums;
     }
 
     .annotation-text {
       font-size: 14px;
-      line-height: 1.5;
+      line-height: 1.45;
       color: #333;
       word-break: break-word;
     }
 
     .annotation-date {
       font-size: 11px;
-      color: #bbb;
-      margin-top: 8px;
+      color: #aaa;
+      margin-top: 7px;
+    }
+
+    .empty-annotations {
+      padding: 24px 16px;
+      color: #999;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 800px) {
+      .watch-layout { grid-template-columns: 1fr; }
+      .annotations-panel { max-height: 360px; }
     }
 
     .loading, .error-msg {
@@ -156,12 +185,16 @@
         <div class="video-channel" id="video-channel"></div>
       </div>
 
-      <div class="video-embed">
-        <div id="yt-player"></div>
-      </div>
+      <div class="watch-layout">
+        <div class="video-embed">
+          <div id="yt-player"></div>
+        </div>
 
-      <div class="annotations-label" id="annotations-label"></div>
-      <div class="annotations-grid" id="annotations-grid"></div>
+        <aside class="annotations-panel" aria-label="Video annotations">
+          <div class="annotations-label" id="annotations-label"></div>
+          <div class="annotations-list" id="annotations-list"></div>
+        </aside>
+      </div>
     </div>
   </div>
 
@@ -174,10 +207,13 @@
       var mainContent = document.getElementById('main-content');
       var videoTitle = document.getElementById('video-title');
       var videoChannel = document.getElementById('video-channel');
-      var annotationsGrid = document.getElementById('annotations-grid');
+      var annotationsList = document.getElementById('annotations-list');
       var annotationsLabel = document.getElementById('annotations-label');
       var ytPlayer = null;
       var playerReady = false;
+      var annotationCards = [];
+      var activeCard = null;
+      var playbackTimer = null;
 
       function showState(el) {
         [loadingState, errorState, mainContent].forEach(function(e) {
@@ -216,6 +252,38 @@
         return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
       }
 
+      function activateCard(card, shouldScroll) {
+        if (!card || activeCard === card) return;
+        if (activeCard) activeCard.element.classList.remove('active');
+        activeCard = card;
+        card.element.classList.add('active');
+        if (shouldScroll) {
+          card.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+
+      function updateActiveAnnotation() {
+        if (!ytPlayer || !playerReady || !annotationCards.length) return;
+        var currentTime = ytPlayer.getCurrentTime();
+        var latestPassed = null;
+        annotationCards.forEach(function(card) {
+          if (card.timestamp <= currentTime) latestPassed = card;
+        });
+        if (latestPassed) activateCard(latestPassed, true);
+      }
+
+      function startPlaybackTracking() {
+        if (playbackTimer) return;
+        updateActiveAnnotation();
+        playbackTimer = window.setInterval(updateActiveAnnotation, 400);
+      }
+
+      function stopPlaybackTracking() {
+        if (!playbackTimer) return;
+        window.clearInterval(playbackTimer);
+        playbackTimer = null;
+      }
+
       function initPlayer(vidId) {
         var tag = document.createElement('script');
         tag.src = 'https://www.youtube.com/iframe_api';
@@ -226,7 +294,14 @@
             videoId: vidId,
             playerVars: { rel: 0, modestbranding: 1 },
             events: {
-              onReady: function() { playerReady = true; }
+              onReady: function() {
+                playerReady = true;
+                updateActiveAnnotation();
+              },
+              onStateChange: function(event) {
+                if (event.data === 1) startPlaybackTracking();
+                else stopPlaybackTracking();
+              }
             }
           });
         };
@@ -234,8 +309,9 @@
 
       function seekTo(seconds) {
         if (ytPlayer && playerReady) {
-          ytPlayer.seekTo(Math.floor(seconds), true);
+          ytPlayer.seekTo(seconds, true);
           ytPlayer.playVideo();
+          updateActiveAnnotation();
         }
       }
 
@@ -276,42 +352,54 @@
 
           initPlayer(vidId);
 
-          var annotations = data.annotations || [];
+          var annotations = (data.annotations || []).slice().sort(function(a, b) {
+            return Number(a.timestamp_seconds) - Number(b.timestamp_seconds) ||
+              new Date(a.created_at) - new Date(b.created_at);
+          });
           annotationsLabel.textContent = annotations.length + ' Annotation' + (annotations.length !== 1 ? 's' : '');
 
-          var activeCard = null;
+          if (!annotations.length) {
+            var empty = document.createElement('div');
+            empty.className = 'empty-annotations';
+            empty.textContent = 'No annotations have been shared for this video.';
+            annotationsList.appendChild(empty);
+          }
 
           annotations.forEach(function(ann) {
-            var card = document.createElement('div');
-            card.className = 'annotation-card';
+            var cardElement = document.createElement('button');
+            cardElement.type = 'button';
+            cardElement.className = 'annotation-card';
+            cardElement.setAttribute('aria-label', 'Play from ' + formatTimestamp(ann.timestamp_seconds));
+            var card = { element: cardElement, timestamp: Number(ann.timestamp_seconds) };
+            annotationCards.push(card);
 
             var ts = document.createElement('div');
             ts.className = 'annotation-timestamp';
             ts.textContent = formatTimestamp(ann.timestamp_seconds);
-            card.appendChild(ts);
+            cardElement.appendChild(ts);
 
             var text = document.createElement('div');
             text.className = 'annotation-text';
             text.textContent = ann.annotation;
-            card.appendChild(text);
+            cardElement.appendChild(text);
 
             var date = document.createElement('div');
             date.className = 'annotation-date';
             date.textContent = formatDate(ann.created_at);
-            card.appendChild(date);
+            cardElement.appendChild(date);
 
-            card.addEventListener('click', function() {
-              if (activeCard) activeCard.classList.remove('active');
-              card.classList.add('active');
-              activeCard = card;
-              seekTo(ann.timestamp_seconds);
-              if (window.innerWidth < 580) {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+            cardElement.addEventListener('click', function() {
+              activateCard(card, false);
+              seekTo(card.timestamp);
+              if (window.innerWidth <= 800) {
+                document.querySelector('.video-embed').scrollIntoView({ behavior: 'smooth', block: 'start' });
               }
             });
 
-            annotationsGrid.appendChild(card);
+            annotationsList.appendChild(cardElement);
           });
+
+          updateActiveAnnotation();
 
           showState(mainContent);
         })
