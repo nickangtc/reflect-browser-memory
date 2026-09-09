@@ -49,6 +49,8 @@
     .watch-layout {
       display: grid;
       grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+      /* The video track is 75% of the available width, at a 16:9 ratio. */
+      height: min(435px, calc((100vw - 68px) * 0.421875));
       gap: 20px;
       align-items: stretch;
     }
@@ -73,6 +75,7 @@
     .annotations-panel {
       display: flex;
       flex-direction: column;
+      height: 100%;
       min-height: 0;
       background: #fff;
       border: 1px solid #e8e8e8;
@@ -158,7 +161,10 @@
     }
 
     @media (max-width: 800px) {
-      .watch-layout { grid-template-columns: 1fr; }
+      .watch-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
       .annotations-panel { max-height: 360px; }
     }
 
