@@ -220,6 +220,7 @@
       var annotationCards = [];
       var activeCard = null;
       var playbackTimer = null;
+      var pendingSeekTimestamp = null;
 
       function showState(el) {
         [loadingState, errorState, mainContent].forEach(function(e) {
@@ -271,6 +272,12 @@
       function updateActiveAnnotation() {
         if (!ytPlayer || !playerReady || !annotationCards.length) return;
         var currentTime = ytPlayer.getCurrentTime();
+        // YouTube updates getCurrentTime asynchronously after seekTo. Keep the
+        // clicked card active until the player has reached that timestamp.
+        if (pendingSeekTimestamp !== null) {
+          if (Math.abs(currentTime - pendingSeekTimestamp) > 1) return;
+          pendingSeekTimestamp = null;
+        }
         var latestPassed = null;
         annotationCards.forEach(function(card) {
           if (card.timestamp <= currentTime) latestPassed = card;
@@ -315,6 +322,7 @@
 
       function seekTo(seconds) {
         if (ytPlayer && playerReady) {
+          pendingSeekTimestamp = seconds;
           ytPlayer.seekTo(seconds, true);
           ytPlayer.playVideo();
           updateActiveAnnotation();
