@@ -54,6 +54,34 @@ test('extracts a normal outer post with exact publication and observation times'
   assert.equal(result.nestedContext.isolationComplete, true);
 });
 
+test('recognizes the current generated-class feed card and extracts its visible fields', () => {
+  const { dom, parser } = parserFor(`
+    <div role="listitem" componentkey="expandedOpaqueKeyFeedType_MAIN_FEED_RELEVANCE">
+      <h2><span>Feed post</span></h2>
+      <a href="/in/current-author/"><span></span></a>
+      <a href="/in/current-author/"><span>Current Author</span></a>
+      <span data-testid="expandable-text-box">Current feed commentary is intentionally long enough to represent the selected post body.</span>
+      <button aria-label="Reaction button state: no reaction">70</button>
+      <button aria-label="Comment">3</button>
+      <button aria-label="Repost"></button>
+      <a role="button" aria-label="Send"></a>
+    </div>`);
+
+  const card = dom.window.document.querySelector('[role="listitem"]');
+  const root = parser.findPostRoot(card.querySelector('[data-testid="expandable-text-box"]'));
+  const result = parser.extractPost(root, {
+    platformPostId: '7500104300883292160',
+    permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:7500104300883292160/',
+    links: [], linkedActivityIds: ['7500104300883292160'], ambiguous: false
+  });
+
+  assert.equal(root, card);
+  assert.equal(result.author.name, 'Current Author');
+  assert.match(result.content.text, /^Current feed commentary/);
+  assert.equal(result.metrics.values.reactions, 70);
+  assert.equal(result.metrics.values.comments, 3);
+});
+
 test('isolates a nested repost subtree from outer author, content, time, and metrics', () => {
   const outerId = '7412345678901234567';
   const nestedId = '7312345678901234567';

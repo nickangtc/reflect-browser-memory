@@ -51,7 +51,15 @@
 
   function directActivityId(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return '';
-    var attributes = ['data-urn', 'data-id', 'data-activity-urn', 'id'];
+    var attributes = [
+      'data-urn',
+      'data-id',
+      'data-activity-urn',
+      'data-entity-urn',
+      'data-update-urn',
+      'data-chameleon-result-urn',
+      'id'
+    ];
     for (var i = 0; i < attributes.length; i++) {
       var id = activityIdFromString(element.getAttribute(attributes[i]));
       if (id) return id;
@@ -82,10 +90,18 @@
 
   function looksLikePostRoot(element) {
     if (!element || element === document.body || element === document.documentElement) return false;
+    var currentFeedCard = element.matches('[role="listitem"][componentkey*="FeedType_"]') &&
+      /^Feed post\b/i.test(textFromElement(element));
+    var semanticRoot = currentFeedCard || element.matches(
+      'article, [role="article"], [data-view-name="feed-full-update"], [data-view-name="feed-update"], ' +
+      '[data-testid="feed-update"], .feed-shared-update-v2, .occludable-update'
+    );
     var hasIdentity = !!directActivityId(element) || postLinks(element).length > 0;
-    if (!hasIdentity) return false;
-    if (actionScore(element) >= 2) return true;
-    return element.matches('article, [role="article"], [data-view-name="feed-full-update"], .feed-shared-update-v2, .occludable-update');
+    // LinkedIn's current feed uses generated classes and identifies cards as
+    // role=listitem with a FeedType component key. Detail pages still expose
+    // the older article/URN structure.
+    if (semanticRoot) return true;
+    return hasIdentity && actionScore(element) >= 2;
   }
 
   function findPostRoot(target) {
@@ -104,9 +120,15 @@
   function resolveIdentity(root) {
     var platformPostId = directActivityId(root);
     var links = postLinks(root);
-    var distinctLinkedIds = Array.from(new Set(links.map(function (link) {
-      return activityIdFromString(link.href || link.getAttribute('href'));
-    }).filter(Boolean)));
+    var identityMarkers = Array.from(root.querySelectorAll(
+      '[data-urn], [data-id], [data-activity-urn], [data-entity-urn], ' +
+      '[data-update-urn], [data-chameleon-result-urn]'
+    ));
+    var distinctLinkedIds = Array.from(new Set(
+      links.map(function (link) {
+        return activityIdFromString(link.href || link.getAttribute('href'));
+      }).concat(identityMarkers.map(directActivityId)).filter(Boolean)
+    ));
     var ambiguous = false;
     var permalink = '';
 
@@ -145,6 +167,58 @@
       linkedActivityIds: distinctLinkedIds,
       ambiguous: ambiguous
     };
+  }
+
+  function feedIdentityFromEmbedLink(link, root) {
+    if (!link) return null;
+    try {
+      var targetUrn = new URL(link.href || link.getAttribute('href'), location.href).searchParams.get('targetUrn') || '';
+      var match = targetUrn.match(/urn:li:(?:activity|share|ugcPost):(\d{10,})/i);
+      if (!match) return null;
+      return {
+        platformPostId: match[1],
+        permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:' + match[1] + '/',
+        links: postLinks(root),
+        linkedActivityIds: [match[1]],
+        ambiguous: false
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function resolveFeedIdentity(root) {
+    var identity = resolveIdentity(root);
+    if (identity.platformPostId || !root.matches('[role="listitem"][componentkey*="FeedType_"]')) {
+      return Promise.resolve(identity);
+    }
+
+    // The current feed omits post URNs and permalinks from the card DOM. Its
+    // read-only control menu exposes the same identity in the Embed URL. Open
+    // that transient menu, read the URN, then close it without choosing an item.
+    var menuButton = Array.from(root.querySelectorAll('button[aria-label]')).find(function (button) {
+      return /^Open control menu for post\b/i.test(button.getAttribute('aria-label') || '');
+    });
+    if (!menuButton) return Promise.resolve(identity);
+
+    menuButton.click();
+    return new Promise(function (resolve) {
+      var attempts = 0;
+      var timer = setInterval(function () {
+        attempts++;
+        var embedLinks = Array.from(document.querySelectorAll('a[href*="/preload/embed-modal/"][href*="targetUrn="]'));
+        var resolved = null;
+        for (var i = 0; i < embedLinks.length && !resolved; i++) {
+          var rect = embedLinks[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) resolved = feedIdentityFromEmbedLink(embedLinks[i], root);
+        }
+        if (resolved || attempts >= 30) {
+          clearInterval(timer);
+          if (menuButton.getAttribute('aria-expanded') === 'true') menuButton.click();
+          resolve(resolved || identity);
+        }
+      }, 50);
+    });
   }
 
   function textFromElement(element) {
@@ -236,14 +310,17 @@
     nestedBoundaries = nestedBoundaries || [];
     var link = null;
     for (var i = 0; i < selectors.length && !link; i++) {
-      link = Array.from(root.querySelectorAll(selectors[i])).find(function (candidate) {
+      var matchingLinks = Array.from(root.querySelectorAll(selectors[i])).filter(function (candidate) {
         return belongsToOuterPost(candidate, root, outerId, nestedBoundaries);
-      }) || null;
+      });
+      link = matchingLinks.find(function (candidate) { return textFromElement(candidate); }) || matchingLinks[0] || null;
     }
     if (!link) return { name: '', profileUrl: '' };
 
-    var nameElement = link.querySelector('[aria-hidden="true"]') || link.querySelector('span') || link;
-    var name = textFromElement(nameElement).split(/\s{2,}|\n/)[0].trim();
+    var nameElement = Array.from(link.querySelectorAll('[aria-hidden="true"], span')).find(function (candidate) {
+      return textFromElement(candidate);
+    }) || link;
+    var name = textFromElement(nameElement).split(/\s{2,}|\n|[·•]/)[0].trim();
     return { name: name, profileUrl: normalizeLinkedInProfileUrl(absoluteUrl(link.getAttribute('href'))) };
   }
 
@@ -251,6 +328,7 @@
     nestedBoundaries = nestedBoundaries || [];
     var selectors = [
       '[data-test-id="main-feed-activity-card__commentary"]',
+      '[data-testid="expandable-text-box"]',
       '.update-components-text',
       '.feed-shared-inline-show-more-text',
       '[data-view-name="feed-commentary"]'
@@ -356,21 +434,24 @@
       .filter(Boolean);
     var text = snippets.join('\n');
 
+    // Require a leading digit and do not let a metric match cross from one
+    // element's snippet into the next.
     var reactions = metricFromText(text, [
-      /([\d,.]+\s*[KMB]?)\s+(?:reactions?|likes?)/i,
-      /(?:reactions?|likes?)\s*[:·]?\s*([\d,.]+\s*[KMB]?)/i
+      /reaction button[^\d\n]{0,80}(\d[\d,.]*\s*[KMB]?)/i,
+      /(\d[\d,.]*\s*[KMB]?)[ \t]+(?:reactions?|likes?)/i,
+      /(?:reactions?|likes?)[ \t]*[:·]?[ \t]*(\d[\d,.]*\s*[KMB]?)/i
     ]);
     var comments = metricFromText(text, [
-      /([\d,.]+\s*[KMB]?)\s+comments?/i,
-      /comments?\s*[:·]?\s*([\d,.]+\s*[KMB]?)/i
+      /comments?[^\d\n]{0,30}(\d[\d,.]*\s*[KMB]?)/i,
+      /(\d[\d,.]*\s*[KMB]?)[ \t]+comments?/i
     ]);
     var reposts = metricFromText(text, [
-      /([\d,.]+\s*[KMB]?)\s+(?:reposts?|shares?)/i,
-      /(?:reposts?|shares?)\s*[:·]?\s*([\d,.]+\s*[KMB]?)/i
+      /(?:reposts?|shares?)[^\d\n]{0,30}(\d[\d,.]*\s*[KMB]?)/i,
+      /(\d[\d,.]*\s*[KMB]?)[ \t]+(?:reposts?|shares?)/i
     ]);
     var impressions = metricFromText(text, [
-      /([\d,.]+\s*[KMB]?)\s+impressions?/i,
-      /impressions?\s*[:·]?\s*([\d,.]+\s*[KMB]?)/i
+      /impressions?[^\d\n]{0,30}(\d[\d,.]*\s*[KMB]?)/i,
+      /(\d[\d,.]*\s*[KMB]?)[ \t]+impressions?/i
     ]);
 
     return {
@@ -452,8 +533,8 @@
     return 'low';
   }
 
-  function extractPost(root) {
-    var identity = resolveIdentity(root);
+  function extractPost(root, identityOverride) {
+    var identity = identityOverride || resolveIdentity(root);
     var nestedContext = resolveNestedPosts(root, identity.platformPostId);
     var author = extractAuthor(root, identity.platformPostId, nestedContext.boundaries);
     var content = extractContent(root, identity.platformPostId, nestedContext.boundaries);
@@ -495,6 +576,9 @@
 
   function showPickerUi() {
     ensureUi();
+    // The UI is visual only. Events must still target the real LinkedIn DOM so
+    // findPostRoot() can walk from the hovered/clicked element to its post card.
+    uiHost.style.pointerEvents = 'none';
     shadow.innerHTML = '<style>' +
       '.banner{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:#172e42;color:#fff;padding:10px 16px;border-radius:999px;font:600 14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.24)}' +
       '.outline{position:fixed;border:3px solid #0a66c2;border-radius:10px;background:rgba(10,102,194,.06);box-sizing:border-box;display:none}' +
@@ -517,15 +601,15 @@
   }
 
   function onPointerMove(event) {
-    if (!active || (uiHost && event.target === uiHost)) return;
+    if (!active) return;
     selectedRoot = findPostRoot(event.target);
     updateOutline(selectedRoot);
   }
 
   function removePickerListeners() {
-    document.removeEventListener('pointermove', onPointerMove, true);
-    document.removeEventListener('click', onPickerClick, true);
-    document.removeEventListener('keydown', onPickerKeydown, true);
+    window.removeEventListener('pointermove', onPointerMove, true);
+    window.removeEventListener('pointerdown', onPickerPointerDown, true);
+    window.removeEventListener('keydown', onPickerKeydown, true);
     window.removeEventListener('scroll', onPickerScroll, true);
     window.removeEventListener('resize', onPickerScroll, true);
   }
@@ -548,19 +632,26 @@
     updateOutline(selectedRoot);
   }
 
-  function onPickerClick(event) {
-    if (!active) return;
+  function onPickerPointerDown(event) {
+    if (!active || event.button !== 0 || event.isPrimary === false) return;
     var root = findPostRoot(event.target) || selectedRoot;
     if (!root) return;
+    // Feed cards can remove or replace their target during pointerdown, and
+    // LinkedIn can consume the later click. Commit the selection from the
+    // earlier pointer event while the exact card is still available.
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
 
     active = false;
     removePickerListeners();
-    var extracted = extractPost(root);
-    chrome.storage.local.get(['linkedinProfileUrl'], function (settings) {
-      showConfirmation(extracted, settings.linkedinProfileUrl || '');
+    var banner = shadow && shadow.querySelector('.banner');
+    if (banner) banner.textContent = 'Reading LinkedIn post…';
+    resolveFeedIdentity(root).then(function (identity) {
+      var extracted = extractPost(root, identity);
+      chrome.storage.local.get(['linkedinProfileUrl'], function (settings) {
+        showConfirmation(extracted, settings.linkedinProfileUrl || '');
+      });
     });
   }
 
@@ -573,9 +664,11 @@
     clearUi();
     active = true;
     showPickerUi();
-    document.addEventListener('pointermove', onPointerMove, true);
-    document.addEventListener('click', onPickerClick, true);
-    document.addEventListener('keydown', onPickerKeydown, true);
+    // Window capture runs before LinkedIn's document/card handlers. Use
+    // pointerdown because feed cards can consume or retarget the later click.
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerdown', onPickerPointerDown, true);
+    window.addEventListener('keydown', onPickerKeydown, true);
     window.addEventListener('scroll', onPickerScroll, true);
     window.addEventListener('resize', onPickerScroll, true);
   }
