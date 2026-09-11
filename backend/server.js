@@ -77,10 +77,10 @@ const resolveSince = (value, fallbackHours = 24) => {
 // still need a compact stable column contract; validate that on startup so
 // schema drift fails early with an actionable error.
 const SEARCH_SCHEMA_CONTRACT = {
-  highlights: ['id', 'client_highlight_id', 'text', 'url', 'annotation', 'context_before', 'context_after', 'xpath', 'created_at'],
+  highlights: ['id', 'client_highlight_id', 'text', 'url', 'page_title', 'annotation', 'context_before', 'context_after', 'xpath', 'created_at'],
   images: ['id', 'client_highlight_id', 'r2_url', 'url', 'page_url', 'page_title', 'width', 'height', 'context_text', 'annotation', 'created_at'],
   notes: ['id', 'url', 'text', 'r2_url', 'created_at'],
-  youtube_annotations: ['id', 'url', 'timestamp_seconds', 'annotation', 'created_at']
+  youtube_annotations: ['id', 'url', 'youtube_title', 'youtube_channel', 'timestamp_seconds', 'annotation', 'created_at']
 };
 
 const SEARCH_TYPES = ['image', 'highlight', 'video', 'article'];
@@ -98,7 +98,7 @@ const articleEventsCte = (includeSearchText = false) => {
       FROM (
         SELECT
           h.url AS base_url,
-          NULL::text AS title,
+          h.page_title AS title,
           REGEXP_REPLACE(REGEXP_REPLACE(h.url, '^https?://', ''), '/.*$', '') AS domain,
           h.created_at,
           to_jsonb(h)::text AS search_text
@@ -244,29 +244,30 @@ app.get('/', (req, res) => {
 // Save highlight
 app.post('/api/highlight', requireApiKey, async (req, res) => {
   try {
-    const { machine_id, client_highlight_id, text, url, annotation, xpath, context_before, context_after } = req.body;
+    const { machine_id, client_highlight_id, text, url, page_title, annotation, xpath, context_before, context_after } = req.body;
 
     if (client_highlight_id) {
       const result = await pool.query(
-        `INSERT INTO highlights (machine_id, client_highlight_id, text, url, annotation, xpath, context_before, context_after, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        `INSERT INTO highlights (machine_id, client_highlight_id, text, url, page_title, annotation, xpath, context_before, context_after, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
          ON CONFLICT (machine_id, client_highlight_id) WHERE client_highlight_id IS NOT NULL
          DO UPDATE SET
            annotation = COALESCE(NULLIF(EXCLUDED.annotation, ''), highlights.annotation),
+           page_title = COALESCE(NULLIF(EXCLUDED.page_title, ''), highlights.page_title),
            updated_at = NOW(),
            processed = FALSE,
            processed_at = NULL
          RETURNING id, created_at, updated_at`,
-        [machine_id, client_highlight_id, text, url, annotation, xpath, context_before, context_after]
+        [machine_id, client_highlight_id, text, url, page_title, annotation, xpath, context_before, context_after]
       );
       return res.json({ success: true, id: result.rows[0].id, created_at: result.rows[0].created_at, updated_at: result.rows[0].updated_at, upserted: true });
     }
 
     const result = await pool.query(
-      `INSERT INTO highlights (machine_id, text, url, annotation, xpath, context_before, context_after, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO highlights (machine_id, text, url, page_title, annotation, xpath, context_before, context_after, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        RETURNING id, created_at, updated_at`,
-      [machine_id, text, url, annotation, xpath, context_before, context_after]
+      [machine_id, text, url, page_title, annotation, xpath, context_before, context_after]
     );
 
     res.json({ success: true, id: result.rows[0].id, created_at: result.rows[0].created_at, updated_at: result.rows[0].updated_at });
@@ -489,7 +490,7 @@ app.put('/api/youtube-annotation/:id', requireApiKey, async (req, res) => {
 // Save YouTube timestamp annotation
 app.post('/api/youtube-annotation', requireApiKey, async (req, res) => {
   try {
-    const { machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, draw_data } = req.body;
+    const { machine_id, client_annotation_id, client_visit_id, url, youtube_title, youtube_channel, timestamp_seconds, annotation, draw_data } = req.body;
 
     if (!client_annotation_id || !annotation) {
       return res.status(400).json({ error: 'client_annotation_id and annotation required' });
@@ -498,17 +499,19 @@ app.post('/api/youtube-annotation', requireApiKey, async (req, res) => {
     const drawDataJson = draw_data ? JSON.stringify(draw_data) : null;
 
     const result = await pool.query(
-      `INSERT INTO youtube_annotations (machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, draw_data, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO youtube_annotations (machine_id, client_annotation_id, client_visit_id, url, youtube_title, youtube_channel, timestamp_seconds, annotation, draw_data, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        ON CONFLICT (machine_id, client_annotation_id) WHERE client_annotation_id IS NOT NULL
        DO UPDATE SET
          annotation = EXCLUDED.annotation,
          draw_data = EXCLUDED.draw_data,
+         youtube_title = COALESCE(NULLIF(EXCLUDED.youtube_title, ''), youtube_annotations.youtube_title),
+         youtube_channel = COALESCE(NULLIF(EXCLUDED.youtube_channel, ''), youtube_annotations.youtube_channel),
          updated_at = NOW(),
          processed = FALSE,
          processed_at = NULL
        RETURNING id, created_at, updated_at`,
-      [machine_id, client_annotation_id, client_visit_id, url, timestamp_seconds, annotation, drawDataJson]
+      [machine_id, client_annotation_id, client_visit_id, url, youtube_title, youtube_channel, timestamp_seconds, annotation, drawDataJson]
     );
 
     res.json({ success: true, id: result.rows[0].id, created_at: result.rows[0].created_at });
@@ -622,8 +625,8 @@ app.get('/api/feed', requireApiKey, async (req, res) => {
     const videoQuery = `
       SELECT
         REGEXP_REPLACE(url, '[&?]t=\\d+', '', 'g') AS base_url,
-        NULL::text AS youtube_title,
-        NULL::text AS youtube_channel,
+        COALESCE(MAX(NULLIF(youtube_title, '')), '') AS youtube_title,
+        COALESCE(MAX(NULLIF(youtube_channel, '')), '') AS youtube_channel,
         COUNT(*) AS annotation_count,
         NULL::text AS youtube_annotation,
         MAX(created_at) AS last_activity,
@@ -786,7 +789,7 @@ app.get('/api/search', requireApiKey, async (req, res) => {
           NULL::integer AS height,
           NULL::text AS context_text,
           NULL::text AS page_url,
-          NULL::text AS page_title,
+          h.page_title,
           h.annotation,
           h.client_highlight_id,
           h.text,
@@ -819,8 +822,8 @@ app.get('/api/search', requireApiKey, async (req, res) => {
           NULL::text AS client_highlight_id,
           NULL::text AS text,
           NULL::text AS url,
-          NULL::text AS youtube_title,
-          NULL::text AS youtube_channel,
+          COALESCE(MAX(NULLIF(ya.youtube_title, '')), '') AS youtube_title,
+          COALESCE(MAX(NULLIF(ya.youtube_channel, '')), '') AS youtube_channel,
           COUNT(*) AS annotation_count,
           NULL::text AS youtube_annotation,
           NULL::bigint AS highlight_count,
@@ -1291,8 +1294,8 @@ app.get('/api/library', requireApiKey, async (req, res) => {
           REGEXP_REPLACE(ya.url, '[&?]t=\\d+', '', 'g') AS base_url,
           COUNT(*) AS item_count,
           MAX(ya.created_at) AS last_activity,
-          NULL::text AS title,
-          NULL::text AS subtitle,
+          COALESCE(MAX(NULLIF(ya.youtube_title, '')), '') AS title,
+          COALESCE(MAX(NULLIF(ya.youtube_channel, '')), '') AS subtitle,
           cs.share_token,
           cs.is_public,
           'video' AS type
@@ -1339,6 +1342,9 @@ app.get('/api/article-highlights', requireApiKey, async (req, res) => {
       ),
       pool.query(
         `SELECT title, domain FROM (
+           SELECT page_title AS title, REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain, created_at
+           FROM highlights WHERE url = $1 AND page_title IS NOT NULL AND page_title != ''
+           UNION ALL
            SELECT page_title AS title, REGEXP_REPLACE(REGEXP_REPLACE(page_url, '^https?://', ''), '/.*$', '') AS domain, created_at
            FROM images WHERE page_url = $1 AND page_title IS NOT NULL AND page_title != ''
            UNION ALL
@@ -1443,6 +1449,9 @@ app.get('/api/shared-article/:token', async (req, res) => {
       ),
       pool.query(
         `SELECT title, domain FROM (
+           SELECT page_title AS title, REGEXP_REPLACE(REGEXP_REPLACE(url, '^https?://', ''), '/.*$', '') AS domain, created_at
+           FROM highlights WHERE url = $1 AND page_title IS NOT NULL AND page_title != ''
+           UNION ALL
            SELECT page_title AS title, REGEXP_REPLACE(REGEXP_REPLACE(page_url, '^https?://', ''), '/.*$', '') AS domain, created_at
            FROM images WHERE page_url = $1 AND page_title IS NOT NULL AND page_title != ''
            UNION ALL
@@ -1476,8 +1485,8 @@ app.get('/api/annotated-videos', requireApiKey, async (req, res) => {
         COUNT(*) AS annotation_count,
         MIN(ya.created_at) AS first_annotation,
         MAX(ya.created_at) AS last_annotation,
-        NULL::text AS title,
-        NULL::text AS channel,
+        COALESCE(MAX(NULLIF(ya.youtube_title, '')), '') AS title,
+        COALESCE(MAX(NULLIF(ya.youtube_channel, '')), '') AS channel,
         cs.share_token,
         cs.is_public
       FROM youtube_annotations ya
@@ -1527,15 +1536,30 @@ app.get('/api/shared-video/:token', async (req, res) => {
     if (!share.rows[0].is_public) return res.status(403).json({ error: 'This video is not publicly shared' });
 
     const videoUrl = share.rows[0].content_url;
-    const annotations = await pool.query(
-      `SELECT id, timestamp_seconds, annotation, created_at
-       FROM youtube_annotations
-       WHERE url LIKE $1
-       ORDER BY timestamp_seconds ASC`,
-      [videoUrl + '%']
-    );
+    const [annotations, metadata] = await Promise.all([
+      pool.query(
+        `SELECT id, timestamp_seconds, annotation, created_at
+         FROM youtube_annotations
+         WHERE url LIKE $1
+         ORDER BY timestamp_seconds ASC`,
+        [videoUrl + '%']
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(MAX(NULLIF(youtube_title, '')), '') AS title,
+           COALESCE(MAX(NULLIF(youtube_channel, '')), '') AS channel
+         FROM youtube_annotations
+         WHERE url LIKE $1`,
+        [videoUrl + '%']
+      )
+    ]);
 
-    res.json({ video_url: videoUrl, title: null, channel: null, annotations: annotations.rows });
+    res.json({
+      video_url: videoUrl,
+      title: metadata.rows[0]?.title || null,
+      channel: metadata.rows[0]?.channel || null,
+      annotations: annotations.rows
+    });
   } catch (error) {
     console.error('Error fetching shared video:', error);
     res.status(500).json({ error: 'Failed to fetch shared video', details: error.message });

@@ -16,6 +16,10 @@
     return (value || '').replace(/\s+/g, ' ').trim();
   }
 
+  function normalizedTitleKey(value) {
+    return cleanTitleValue(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
   function isUsefulTitle(value) {
     var title = cleanTitleValue(value);
     if (!title) return false;
@@ -23,8 +27,14 @@
 
     var lower = title.toLowerCase();
     var host = location.hostname.replace(/^www\./, '').toLowerCase();
+    var hostLabels = host.split('.');
+    var titleKey = normalizedTitleKey(title);
+    var isSiteNameOnly = hostLabels.some(function(label) {
+      return label.length > 2 && titleKey === normalizedTitleKey(label);
+    });
 
     if (lower === host) return false;
+    if (titleKey === normalizedTitleKey(host) || isSiteNameOnly) return false;
     if (lower === location.href.toLowerCase()) return false;
     if (lower === 'untitled') return false;
     if (lower === 'new tab') return false;
@@ -48,6 +58,29 @@
     return isUsefulTitle(value) ? value : '';
   }
 
+  function titleFromPath() {
+    try {
+      var parts = location.pathname.split('/').filter(Boolean);
+      if (!parts.length) return '';
+
+      var slug = decodeURIComponent(parts[parts.length - 1])
+        .replace(/\.(?:html?|php|aspx?)$/i, '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2');
+      slug = cleanTitleValue(slug);
+      if (!slug || !/[a-z]/i.test(slug)) return '';
+
+      return slug.split(' ').map(function(word) {
+        if (/^(api|css|dns|html|http|https|ip|sql|tcp|ui|url|ux)$/i.test(word)) {
+          return word.toUpperCase();
+        }
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }).join(' ');
+    } catch (e) {
+      return '';
+    }
+  }
+
   function extractBestPageTitle() {
     var docTitle = cleanTitleValue(document.title);
     var ogTitle = firstMetaContent([
@@ -64,7 +97,36 @@
     if (ogTitle) return ogTitle;
     if (twitterTitle) return twitterTitle;
     if (headingTitle) return headingTitle;
-    return docTitle || ogTitle || twitterTitle || headingTitle || '';
+    return titleFromPath();
+  }
+
+  function firstElementText(selectors) {
+    for (var i = 0; i < selectors.length; i++) {
+      var element = document.querySelector(selectors[i]);
+      var value = cleanTitleValue(element && element.textContent);
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function extractYouTubeMetadata() {
+    var title = firstElementText([
+      'ytd-watch-metadata h1 yt-formatted-string',
+      'h1.ytd-watch-metadata yt-formatted-string',
+      '#title h1 yt-formatted-string'
+    ]);
+    if (!title) title = firstMetaContent(['meta[name="title"]', 'meta[property="og:title"]']);
+    if (!title) title = cleanTitleValue(document.title).replace(/\s*-\s*YouTube\s*$/i, '');
+    if (!isUsefulTitle(title)) title = extractBestPageTitle().replace(/\s*-\s*YouTube\s*$/i, '');
+
+    return {
+      title: cleanTitleValue(title),
+      channel: firstElementText([
+        'ytd-video-owner-renderer #channel-name a',
+        '#owner #channel-name a',
+        'ytd-watch-metadata ytd-channel-name a'
+      ])
+    };
   }
 
   // -- Styles --
@@ -463,7 +525,8 @@
             xpath: highlight.xpath,
             contextBefore: highlight.ctxBefore,
             contextAfter: highlight.ctxAfter,
-            annotation: note
+            annotation: note,
+            pageTitle: highlight.pageTitle || extractBestPageTitle()
           }
         });
       }
@@ -662,6 +725,7 @@
 
     sel.removeAllRanges();
 
+    var pageTitle = extractBestPageTitle();
     var data = {
       id: id,
       text: text,
@@ -669,6 +733,7 @@
       ctxBefore: ctxBefore,
       ctxAfter: ctxAfter,
       note: '',
+      pageTitle: pageTitle,
       createdAt: new Date().toISOString()
     };
     var key = pageKey();
@@ -691,7 +756,8 @@
                 xpath: aXPath,
                 contextBefore: ctxBefore,
                 contextAfter: ctxAfter,
-                annotation: ''
+                annotation: '',
+                pageTitle: pageTitle
               }
             });
           } catch (e) { /* extension context invalidated */ }
@@ -704,7 +770,7 @@
                   action: 'images-captured',
                   clientHighlightId: id,
                   pageUrl: location.href,
-                  pageTitle: document.title,
+                  pageTitle: pageTitle,
                   contextText: text,
                   images: images
                 });
@@ -2037,11 +2103,14 @@
             var urlObj = new URL(location.href);
             var vParam = urlObj.searchParams.get('v');
             var cleanVideoUrl = urlObj.origin + urlObj.pathname + (vParam ? '?v=' + vParam : '');
+            var youtubeMetadata = extractYouTubeMetadata();
             safeSend({
               action: 'youtube-annotation',
               visitId: ytVisitId,
               url: cleanVideoUrl,
-              annotation: note
+              annotation: note,
+              youtubeTitle: youtubeMetadata.title,
+              youtubeChannel: youtubeMetadata.channel
             });
           }
           el.remove();
@@ -2187,13 +2256,16 @@
           el.remove();
           if (canvas && canvas.parentNode) canvas.remove();
 
+          var youtubeMetadata = extractYouTubeMetadata();
           var payload = {
             action: 'youtube-timestamp-annotation',
             annotationId: annotationId,
             visitId: ytVisitId,
             url: urlWithTs,
             timestampSeconds: timestampSec,
-            annotation: note
+            annotation: note,
+            youtubeTitle: youtubeMetadata.title,
+            youtubeChannel: youtubeMetadata.channel
           };
           
           if (strokes.length > 0) {

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS highlights (
   client_highlight_id VARCHAR(255),
   text TEXT NOT NULL,
   url TEXT NOT NULL,
+  page_title TEXT,
   annotation TEXT,
   xpath TEXT,
   context_before TEXT,
@@ -17,6 +18,9 @@ CREATE TABLE IF NOT EXISTS highlights (
   processed BOOLEAN DEFAULT FALSE,
   processed_at TIMESTAMP
 );
+
+-- Existing installations keep their rows unchanged; only new captures populate this field.
+ALTER TABLE highlights ADD COLUMN IF NOT EXISTS page_title TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS highlights_machine_client_id
   ON highlights (machine_id, client_highlight_id)
@@ -31,6 +35,8 @@ CREATE TABLE IF NOT EXISTS youtube_annotations (
   client_annotation_id VARCHAR(255),
   client_visit_id VARCHAR(255),
   url TEXT NOT NULL,
+  youtube_title TEXT,
+  youtube_channel TEXT,
   timestamp_seconds INTEGER,
   annotation TEXT NOT NULL,
   draw_data JSONB,
@@ -39,6 +45,10 @@ CREATE TABLE IF NOT EXISTS youtube_annotations (
   processed BOOLEAN DEFAULT FALSE,
   processed_at TIMESTAMP
 );
+
+ALTER TABLE youtube_annotations
+  ADD COLUMN IF NOT EXISTS youtube_title TEXT,
+  ADD COLUMN IF NOT EXISTS youtube_channel TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS youtube_annotations_machine_client_id
   ON youtube_annotations (machine_id, client_annotation_id)

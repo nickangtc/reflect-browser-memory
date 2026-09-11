@@ -198,6 +198,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
         text: msg.highlight.text,
         url: msg.highlight.url,
         annotation: msg.highlight.annotation || '',
+        page_title: msg.highlight.pageTitle || '',
         xpath: msg.highlight.xpath || '',
         context_before: msg.highlight.contextBefore || '',
         context_after: msg.highlight.contextAfter || ''
@@ -288,6 +289,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
       client_annotation_id: 'reflection-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       client_visit_id: msg.visitId,
       url: msg.url,
+      youtube_title: msg.youtubeTitle || '',
+      youtube_channel: msg.youtubeChannel || '',
       timestamp_seconds: null,
       annotation: msg.annotation
     });
@@ -300,6 +303,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
       client_annotation_id: msg.annotationId,
       client_visit_id: msg.visitId,
       url: msg.url,
+      youtube_title: msg.youtubeTitle || '',
+      youtube_channel: msg.youtubeChannel || '',
       timestamp_seconds: msg.timestampSeconds,
       annotation: msg.annotation,
       draw_data: msg.drawData

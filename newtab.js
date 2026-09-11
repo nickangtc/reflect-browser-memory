@@ -218,6 +218,30 @@
     catch(e) { return url; }
   }
 
+  function titleFromUrlPath(url) {
+    try {
+      var parts = new URL(url).pathname.split('/').filter(Boolean);
+      if (!parts.length) return '';
+      var slug = decodeURIComponent(parts[parts.length - 1])
+        .replace(/\.(?:html?|php|aspx?)$/i, '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!slug || !/[a-z]/i.test(slug)) return '';
+      return slug.split(' ').map(function(word) {
+        if (/^(api|css|dns|html|http|https|ip|sql|tcp|ui|url|ux)$/i.test(word)) return word.toUpperCase();
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }).join(' ');
+    } catch(e) {
+      return '';
+    }
+  }
+
+  function articleTitle(item) {
+    return item.title || titleFromUrlPath(item.base_url) || extractDomain(item.base_url);
+  }
+
   function formatRelative(iso) {
     var d = new Date(iso);
     var now = new Date();
@@ -605,12 +629,12 @@
         if (item.preview_image) {
           var thumbImg = el('img', 'card-thumb article-thumb');
           thumbImg.src = item.preview_image.r2_url;
-          thumbImg.alt = item.title || 'Article image';
+          thumbImg.alt = articleTitle(item) || 'Article image';
           thumbImg.loading = 'lazy';
           card.appendChild(thumbImg);
         }
         var body = el('div', 'card-body');
-        body.appendChild(el('div', 'card-title', item.title || extractDomain(item.base_url)));
+        body.appendChild(el('div', 'card-title', articleTitle(item)));
         body.appendChild(el('div', 'card-meta', extractDomain(item.base_url)));
         if (item.highlight_count > 0) {
           body.appendChild(el('span', 'card-badge badge-highlight', item.highlight_count + ' highlight' + (item.highlight_count != 1 ? 's' : '')));
@@ -1422,7 +1446,7 @@
 
   // -- Article modal --
   function renderArticleModal(item) {
-    modalBody.appendChild(el('div', 'modal-title', item.title || extractDomain(item.base_url)));
+    modalBody.appendChild(el('div', 'modal-title', articleTitle(item)));
 
     var meta = el('div', 'modal-meta');
     var link = el('a', '', extractDomain(item.base_url));
