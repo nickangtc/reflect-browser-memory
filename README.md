@@ -1,6 +1,6 @@
 # Reflect
 
-Reflect is a local-first Chrome extension for saving what you want to remember: highlights, annotations, nearby images, notes, Read Later pages, and YouTube timestamp notes.
+Reflect is a local-first Chrome extension for saving what you want to remember: highlights, annotations, nearby images, notes, Read Later pages, YouTube timestamp notes, and explicit social-post reflections.
 
 Sync is **off by default**. For cross-device sync, dashboard data, and sharing annotations through public URLs, deploy the Railway backend and configure it in the extension settings.
 
@@ -45,9 +45,16 @@ The Today view loads images from Unsplash domains. With an access key configured
 - Read Later pages, when backend sync is configured
 - YouTube timestamp annotations and progress-bar markers
 - Optional YouTube watch reflections
+- User-confirmed LinkedIn post reflections with repeatable metric snapshots
 - Local watched-video memory that avoids repeat reflection prompts
 
-Reflect does **not** capture general page history, browsing trails, referrers, social interactions, or network requests. See [`PRIVACY.md`](PRIVACY.md).
+Reflect does **not** capture general page history, browsing trails, referrers, automatic social interactions, or network requests. LinkedIn posts are captured only after explicit selection, review, and confirmation. See [`PRIVACY.md`](PRIVACY.md).
+
+### LinkedIn post reflections
+
+On LinkedIn, use the **Select a LinkedIn post to reflect on** extension command (suggested shortcut `Command+Shift+Y` on macOS or `Ctrl+Shift+Y` elsewhere), then select a post and review the extracted data before saving. Configure shortcuts at `chrome://extensions/shortcuts` and set your LinkedIn profile URL in Reflect settings so your own posts can be identified by exact profile URL. Reflect settings also shows pending or failed captures and provides Retry and Discard controls.
+
+See [`docs/social-post-reflections/README.md`](docs/social-post-reflections/README.md) for the intent, safety boundaries, time model, and data design.
 
 ## Review surfaces
 
@@ -73,6 +80,7 @@ Main tables:
 - `youtube_annotations`
 - `read_later`
 - `content_shares`
+- `social_posts`, `social_post_snapshots`, and `social_post_reflections`
 
 Protected endpoints require an `X-API-Key` header matching `API_KEY`. Public annotation share URLs are served by the backend, so sharing is unavailable in local-only mode.
 
@@ -84,6 +92,8 @@ node --check content.js
 node --check newtab.js
 node --check settings.js
 node --check backend/server.js
+node --check linkedin-capture.js
+npm --prefix backend test
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
 git diff --check
 ```

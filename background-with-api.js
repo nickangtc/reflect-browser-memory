@@ -2,6 +2,7 @@
 // Sync is optional and configured from the extension settings page.
 
 var HIGHLIGHT_KEY = 'xr_highlights';
+var SOCIAL_POST_CAPTURE_KEY = 'xr_social_post_captures';
 var YOUTUBE_WATCHED_KEY_PREFIX = 'xr_youtube_watched:';
 
 function youtubeVideoId(videoUrl) {
@@ -111,7 +112,7 @@ async function apiErrorMessage(response) {
   return detail || `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
 }
 
-async function apiRequest(endpoint, data, retries = 3) {
+async function apiRequest(endpoint, data, retries = 3, queueOnFailure = true) {
   await ensureConfig();
   if (!API_CONFIG.enabled) return null;
 
@@ -138,12 +139,57 @@ async function apiRequest(endpoint, data, retries = 3) {
     } catch (error) {
       console.error(`API request failed (${attempt}/${retries}):`, error.message);
       if (attempt === retries) {
-        queueFailedRequest(endpoint, data);
+        if (queueOnFailure) queueFailedRequest(endpoint, data);
         return null;
       }
       await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
     }
   }
+}
+
+async function deliverSocialCapture(capture, retries = 3) {
+  await ensureConfig();
+  if (!API_CONFIG.enabled || !API_CONFIG.apiKey || !API_CONFIG.baseUrl || !API_CONFIG.machineId) {
+    return { state: 'pending', error: 'Backend sync is not configured' };
+  }
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(`${API_CONFIG.baseUrl}/api/v1/social-post-captures`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_CONFIG.apiKey
+        },
+        body: JSON.stringify({ machine_id: API_CONFIG.machineId, ...capture })
+      });
+      if (response.ok) return { state: 'synced', result: await response.json() };
+
+      const error = await apiErrorMessage(response);
+      const retryable = response.status === 401 || response.status === 403 ||
+        response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable) return { state: 'failed', error: error, status: response.status };
+      if (attempt === retries) return { state: 'pending', error: error, status: response.status };
+    } catch (error) {
+      if (attempt === retries) return { state: 'pending', error: error.message };
+    }
+    await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+  }
+
+  return { state: 'pending', error: 'Unknown delivery failure' };
+}
+
+async function deliverAndUpdateSocialCapture(capture, retries) {
+  const delivery = await deliverSocialCapture(capture, retries);
+  if (delivery.state === 'synced') {
+    await removeLocalSocialCapture(capture.client_capture_id);
+  } else {
+    await storeLocalSocialCapture(capture, delivery.state, {
+      error: delivery.error || null,
+      status: delivery.status || null
+    });
+  }
+  return delivery;
 }
 
 function queueFailedRequest(endpoint, data) {
@@ -154,6 +200,78 @@ function queueFailedRequest(endpoint, data) {
   });
 }
 
+var socialStorageMutation = Promise.resolve();
+
+function readLocalSocialCaptures() {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get([SOCIAL_POST_CAPTURE_KEY], result => {
+      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+      resolve(result[SOCIAL_POST_CAPTURE_KEY] || []);
+    });
+  });
+}
+
+function storeLocalSocialCapture(capture, syncStatus, backendResult) {
+  var mutation = socialStorageMutation.catch(function () {}).then(async function () {
+    const captures = await readLocalSocialCaptures();
+    const record = {
+      ...capture,
+      sync_status: syncStatus,
+      backend_result: backendResult || null,
+      locally_updated_at: new Date().toISOString()
+    };
+    const existingIndex = captures.findIndex(item => item.client_capture_id === capture.client_capture_id);
+    if (existingIndex >= 0) captures[existingIndex] = record;
+    else captures.push(record);
+
+    await new Promise((resolve, reject) => {
+      chrome.storage.local.set({ [SOCIAL_POST_CAPTURE_KEY]: captures }, function () {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        resolve();
+      });
+    });
+  });
+  socialStorageMutation = mutation;
+  return mutation;
+}
+
+function removeLocalSocialCapture(clientCaptureId) {
+  var mutation = socialStorageMutation.catch(function () {}).then(async function () {
+    const captures = await readLocalSocialCaptures();
+    const remaining = captures.filter(item => item.client_capture_id !== clientCaptureId);
+    await new Promise((resolve, reject) => {
+      chrome.storage.local.set({ [SOCIAL_POST_CAPTURE_KEY]: remaining }, function () {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        resolve();
+      });
+    });
+  });
+  socialStorageMutation = mutation;
+  return mutation;
+}
+
+async function syncPendingSocialCaptures() {
+  await ensureConfig();
+  if (!API_CONFIG.enabled || !API_CONFIG.apiKey || !API_CONFIG.baseUrl || !API_CONFIG.machineId) return;
+
+  var captures;
+  try {
+    captures = await readLocalSocialCaptures();
+  } catch (error) {
+    console.error('Could not read social-post outbox:', error.message);
+    return;
+  }
+
+  for (const capture of captures) {
+    if (capture.sync_status !== 'pending') continue;
+    try {
+      await deliverAndUpdateSocialCapture(capture, 1);
+    } catch (error) {
+      console.error('Could not update social-post outbox:', error.message);
+    }
+  }
+}
+
 async function retryFailedRequests() {
   chrome.storage.local.get(['failedRequests'], async (result) => {
     const queue = result.failedRequests || [];
@@ -162,7 +280,10 @@ async function retryFailedRequests() {
     console.log(`Retrying ${queue.length} failed requests...`);
     const remaining = [];
     for (const item of queue) {
-      const success = await apiRequest(item.endpoint, item.data, 1);
+      const success = await apiRequest(item.endpoint, item.data, 1, false);
+      if (success && item.endpoint === '/api/v1/social-post-captures') {
+        await removeLocalSocialCapture(item.data.client_capture_id);
+      }
       if (!success) {
         const age = Date.now() - item.timestamp;
         if (age < 7 * 24 * 60 * 60 * 1000) remaining.push(item);
@@ -172,21 +293,114 @@ async function retryFailedRequests() {
   });
 }
 
-setInterval(retryFailedRequests, 5 * 60 * 1000);
-self.addEventListener('online', retryFailedRequests);
+const RETRY_ALARM = 'reflect-retry-failed-requests';
+chrome.alarms.create(RETRY_ALARM, { periodInMinutes: 5 });
+chrome.alarms.onAlarm.addListener(function (alarm) {
+  if (alarm.name === RETRY_ALARM) {
+    retryFailedRequests();
+    syncPendingSocialCaptures();
+  }
+});
+chrome.runtime.onStartup.addListener(function () {
+  retryFailedRequests();
+  syncPendingSocialCaptures();
+});
+self.addEventListener('online', function () {
+  retryFailedRequests();
+  syncPendingSocialCaptures();
+});
 
 chrome.commands.onCommand.addListener(function (command) {
-  if (command === 'highlight-selection' || command === 'annotate-youtube') {
+  if (command === 'highlight-selection' || command === 'annotate-youtube' || command === 'capture-linkedin-post') {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       if (!tabs[0]) return;
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: command === 'highlight-selection' ? 'highlight' : 'annotate-youtube'
+      var action = command === 'highlight-selection'
+        ? 'highlight'
+        : command === 'annotate-youtube'
+          ? 'annotate-youtube'
+          : 'start-social-post-capture';
+      chrome.tabs.sendMessage(tabs[0].id, { action: action }, function () {
+        // Reading lastError prevents a noisy service-worker warning on non-matching pages.
+        void chrome.runtime.lastError;
       });
     });
   }
 });
 
+self.__reflectBackgroundForTests = {
+  deliverSocialCapture: deliverSocialCapture,
+  syncPendingSocialCaptures: syncPendingSocialCaptures,
+  readLocalSocialCaptures: readLocalSocialCaptures
+};
+
 chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
+  if (msg.action === 'get-social-post-outbox') {
+    readLocalSocialCaptures()
+      .then(captures => reply({ ok: true, captures: captures }))
+      .catch(error => reply({ ok: false, error: error.message, captures: [] }));
+    return true;
+  }
+
+  if (msg.action === 'retry-social-post-capture') {
+    (async function () {
+      try {
+        var captures = await readLocalSocialCaptures();
+        var capture = captures.find(item => item.client_capture_id === msg.client_capture_id);
+        if (!capture) return reply({ ok: false, error: 'Capture not found' });
+        await storeLocalSocialCapture(capture, 'pending', null);
+        var delivery = await deliverAndUpdateSocialCapture(capture, 1);
+        reply({
+          ok: delivery.state !== 'failed',
+          synced: delivery.state === 'synced',
+          state: delivery.state,
+          error: delivery.error || null
+        });
+      } catch (error) {
+        reply({ ok: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.action === 'discard-social-post-capture') {
+    removeLocalSocialCapture(msg.client_capture_id)
+      .then(() => reply({ ok: true }))
+      .catch(error => reply({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (msg.action === 'save-social-post-capture') {
+    (async function () {
+      try {
+        var capture = msg.capture;
+        if (!capture || !capture.client_capture_id) {
+          reply({ ok: false, error: 'Invalid social-post capture' });
+          return;
+        }
+
+        await storeLocalSocialCapture(capture, 'pending', null);
+        // The durable local outbox owns retries for social captures. Permanent
+        // contract errors become visible failed records instead of retrying forever.
+        var delivery = await deliverAndUpdateSocialCapture(capture, 3);
+        if (delivery.state === 'synced') {
+          reply({ ok: true, synced: true, backend: delivery.result });
+        } else if (delivery.state === 'failed') {
+          reply({
+            ok: false,
+            saved_locally: true,
+            permanent_failure: true,
+            error: `Saved locally, but the backend rejected this capture: ${delivery.error}`
+          });
+        } else {
+          reply({ ok: true, synced: false, pending: true, error: delivery.error || null });
+        }
+      } catch (error) {
+        reply({ ok: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
   if (msg.action === 'highlight-created') {
     chrome.storage.local.get([HIGHLIGHT_KEY], function (res) {
       var arr = res[HIGHLIGHT_KEY] || [];
@@ -486,6 +700,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
       API_CONFIG.baseUrl = result.apiBaseUrl || '';
       API_CONFIG.apiKey = result.apiKey || '';
       reply({ ok: true });
+      syncPendingSocialCaptures();
     });
     return true;
   }

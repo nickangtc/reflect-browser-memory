@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const createSocialPostsRouter = require('./routes/social-posts');
 
 // Cloudflare R2 client (S3-compatible)
 const r2 = process.env.R2_ACCOUNT_ID ? new S3Client({
@@ -240,6 +241,9 @@ const ensureAnnotatedContentUpdatedAt = async () => {
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'reflect-backend' });
 });
+
+// Intentional social-post captures use an isolated, versioned API surface.
+app.use('/api', createSocialPostsRouter({ pool, requireApiKey }));
 
 // Save highlight
 app.post('/api/highlight', requireApiKey, async (req, res) => {

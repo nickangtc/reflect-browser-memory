@@ -10,10 +10,13 @@
 - Standalone notes
 - Read Later without referrer/breadcrumb tracking
 - YouTube timestamp annotations and watch reflections
+- Explicit, user-confirmed LinkedIn post reflections with timestamped metric snapshots
 - New tab Library / Read / Activity / Analytics surfaces
 - Optional backend sync
 
 Removed from scope: passive browsing history, browsing trails, automatic social tracking, network interception, YouTube blocking/checkpoints, hosted backend review pages, processing endpoints, Obsidian sync, settings sync stats, and extension action shortcut.
+
+The LinkedIn feature is deliberate capture, not tracking. Read `docs/social-post-reflections/README.md` before changing it.
 
 OSS migration task tracking lives in uppercase `TASKS.md`; keep that filename casing.
 
@@ -22,7 +25,7 @@ OSS migration task tracking lives in uppercase `TASKS.md`; keep that filename ca
 - `npm start` runs `node server.js`
 - Uses `PORT` env var (default 3000), `DATABASE_URL`, `API_KEY`
 - Protected endpoints require `x-api-key` header
-- Backend schema/API is scoped to retained capture types: highlights, images, notes, Read Later, YouTube annotations, and share metadata.
+- Backend schema/API is scoped to retained capture types: highlights, images, notes, Read Later, YouTube annotations, explicit social-post reflections, and share metadata.
 - Analytics “Top Capture Sources”/domain counts must be derived only from explicit capture tables (`highlights`, `images`, `notes`, `read_later`), not passive page visits.
 - Share metadata lives in `content_shares` (`content_url`, `share_token`, `is_public`); `/a/:token` and `/v/:token` public URLs both use this table.
 - Notes use `text`, `r2_key`, and `r2_url`; do not query legacy `notes.title`/`notes.note` in feed or metadata queries.
@@ -35,7 +38,8 @@ OSS migration task tracking lives in uppercase `TASKS.md`; keep that filename ca
 
 ## Extension
 - Service worker: `background-with-api.js`
-- Content script: `content.js`
+- General content script: `content.js`
+- LinkedIn-only post selector and reflection UI: `linkedin-capture.js`; keep LinkedIn parsing out of `content.js`.
 - New tab override: `newtab.html` + `newtab.js`
 - Popup: `popup.html` + `popup.js`
 - Options page: `settings.html` + `settings.js`

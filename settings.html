@@ -190,6 +190,45 @@
       color: #666;
       margin-top: 4px;
     }
+
+    .outbox-empty {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .outbox-item {
+      border: 1px solid #e2e5e9;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 10px;
+    }
+
+    .outbox-item-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-weight: 600;
+    }
+
+    .outbox-state {
+      text-transform: uppercase;
+      font-size: 11px;
+      color: #9a6700;
+    }
+
+    .outbox-state.failed { color: #b42318; }
+    .outbox-detail { margin-top: 6px; color: #555; font-size: 13px; line-height: 1.4; }
+    .outbox-error { margin-top: 6px; color: #b42318; font-size: 12px; }
+    .outbox-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .outbox-actions button {
+      border: 1px solid #ccd1d7;
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .outbox-actions button:hover { background: #f3f4f6; }
+    .outbox-actions .discard { color: #b42318; }
   </style>
 </head>
 <body>
@@ -225,6 +264,14 @@
     </div>
 
     <div style="margin-top: 24px;">
+      <label for="linkedinProfileUrl">Your LinkedIn Profile URL</label>
+      <input type="text" id="linkedinProfileUrl" placeholder="https://www.linkedin.com/in/your-profile">
+      <div class="help-text">
+        Used only to distinguish your posts from other authors’ posts. Reflect compares this exact normalized profile URL and asks you to confirm every capture.
+      </div>
+    </div>
+
+    <div style="margin-top: 24px;">
       <label for="unsplashAccessKey">Unsplash Access Key</label>
       <input type="text" id="unsplashAccessKey" placeholder="Enter Unsplash access key">
       <div class="help-text">
@@ -244,6 +291,12 @@
     <div class="status" id="status"></div>
   </div>
 
+  <div class="card">
+    <h1>Social Post Outbox</h1>
+    <p class="subtitle">Confirmed reflections waiting for Railway, or rejected captures requiring attention.</p>
+    <div id="socialOutbox"><div class="outbox-empty">Loading…</div></div>
+    <div class="status" id="outboxStatus"></div>
+  </div>
 
   <script src="settings.js"></script>
 </body>

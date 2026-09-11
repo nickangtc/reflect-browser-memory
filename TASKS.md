@@ -12,6 +12,9 @@
 ## Manual smoke test
 
 - Load unpacked extension.
+- Configure the LinkedIn profile URL and verify the post-selector shortcut at `chrome://extensions/shortcuts`.
+- On LinkedIn, select and confirm one own post and one external post; verify ownership defaults and correct them if needed.
+- Capture the same LinkedIn post twice and verify one canonical post has two timestamped snapshots.
 - Create a local text highlight with sync disabled.
 - Configure Railway backend sync and create a synced highlight.
 - Save/unsave a page with Read Later.

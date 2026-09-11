@@ -9,6 +9,10 @@
   var readLaterBtn = document.getElementById('read-later-btn');
   var readLaterLabel = document.getElementById('read-later-label');
   var readLaterStatus = document.getElementById('read-later-status');
+  var socialPostBtn = document.getElementById('social-post-btn');
+  var socialPostStatus = document.getElementById('social-post-status');
+  var socialShortcutDisplay = document.getElementById('social-shortcut-display');
+  var socialShortcutChangeBtn = document.getElementById('social-shortcut-change');
 
   var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   var SHORTCUT_KEY = 'hltr_shortcut';
@@ -140,6 +144,43 @@
   }
 
   loadYtShortcut();
+
+  // ========== LinkedIn post selector ==========
+  function loadSocialShortcut() {
+    chrome.commands.getAll(function (commands) {
+      var command = (commands || []).find(function (item) { return item.name === 'capture-linkedin-post'; });
+      socialShortcutDisplay.textContent = command && command.shortcut ? command.shortcut : 'Not assigned';
+    });
+  }
+
+  socialShortcutChangeBtn.addEventListener('click', function () {
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    window.close();
+  });
+
+  function initSocialPostCapture() {
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      if (!tabs[0] || !tabs[0].url || !/^https:\/\/www\.linkedin\.com\//i.test(tabs[0].url)) {
+        socialPostBtn.disabled = true;
+        socialPostStatus.textContent = 'Available on LinkedIn';
+        return;
+      }
+
+      socialPostBtn.disabled = false;
+      socialPostBtn.addEventListener('click', function () {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'start-social-post-capture' }, function (response) {
+          if (chrome.runtime.lastError || !response || !response.ok) {
+            socialPostStatus.textContent = 'Reload the LinkedIn tab and try again';
+            return;
+          }
+          window.close();
+        });
+      });
+    });
+  }
+
+  loadSocialShortcut();
+  initSocialPostCapture();
 
   // ========== Read Later ==========
   function initReadLater() {

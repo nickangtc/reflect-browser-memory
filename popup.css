@@ -66,6 +66,34 @@ body {
   margin-top: 6px;
 }
 
+/* Social post reflection */
+.social-post-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.social-post-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: 2px solid #0a66c2;
+  border-radius: 8px;
+  background: #0a66c2;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.social-post-btn:hover:not(:disabled) {
+  background: #084f96;
+  border-color: #084f96;
+}
+
+.social-post-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Shortcuts section */
 .shortcuts-section {
   border-top: 1px solid #eee;

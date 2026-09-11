@@ -16,6 +16,9 @@ This document reflects the public scope of Reflect after removing privacy-sensit
 - YouTube annotation markers on the progress bar
 - YouTube annotation editing/deletion
 - YouTube watch reflections
+- Explicit, user-confirmed LinkedIn post reflections
+- Repeated timestamped metric snapshots for the same LinkedIn post
+- Configurable LinkedIn post-selector command
 - Local watched-video memory that suppresses repeat reflection prompts
 - Narrow YouTube metadata needed to label annotation cards
 - New tab dashboard with Library, Read, Activity, and Analytics tabs
@@ -35,8 +38,8 @@ This document reflects the public scope of Reflect after removing privacy-sensit
 - X/Twitter tracking
 - X quote-tweet reason capture
 - Copy for Agent on X
-- LinkedIn tracking
-- Social interaction “Why?” prompts
+- Passive LinkedIn tracking or feed collection
+- Automatic social interaction “Why?” prompts
 - YouTube value checkpoint / blocking
 - Network/search request capture and sanitization
 - Hosted backend review pages at `/library`, `/article`, and `/video`
